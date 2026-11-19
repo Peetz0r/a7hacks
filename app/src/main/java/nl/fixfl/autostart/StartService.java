@@ -9,6 +9,7 @@ import android.os.SystemClock;
 import java.io.FileOutputStream;
 
 public class StartService extends Service {
+    static long lastStart = 0;
     static final String LOGFILE = "autostart.log";
 
     // Java-side log that doesn't depend on the root shell. Readable from the Linux side at
@@ -32,6 +33,14 @@ public class StartService extends Service {
     @Override
     public int onStartCommand(final Intent intent, int flags, int startId) {
         final String event = intent == null ? "null" : String.valueOf(intent.getStringExtra("event"));
+        long now = SystemClock.elapsedRealtime();
+        synchronized (StartService.class) {
+            if (lastStart != 0 && now - lastStart < 60000) {
+                jlog(this, "event " + event + " (ignored, started recently)");
+                return START_NOT_STICKY;
+            }
+            lastStart = now;
+        }
         jlog(this, "event " + event);
         new Thread() {
             @Override

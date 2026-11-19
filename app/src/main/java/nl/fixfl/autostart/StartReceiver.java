@@ -3,20 +3,13 @@ package nl.fixfl.autostart;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.util.Log;
 
 public class StartReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
-        try {
-            Starter.log(intent.getAction());
-        } catch (Exception e) {
-            Log.e("FixFlAutostart", "log failed", e);
-        }
-        try {
-            Starter.start();
-        } catch (Exception e) {
-            Log.e("FixFlAutostart", "start failed", e);
-        }
+        // Hand over to a service: it can retry for a while, a receiver cannot.
+        Intent i = new Intent(context, StartService.class);
+        i.putExtra("event", intent.getAction());
+        context.startService(i);
     }
 }

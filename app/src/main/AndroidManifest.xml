@@ -3,7 +3,7 @@
 
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
-    <application android:label="FixFl autostart" android:icon="@android:drawable/ic_menu_compass">
+    <application android:label="Fixfl autostart" android:icon="@android:drawable/ic_menu_compass">
         <activity android:name="nl.fixfl.autostart.MainActivity"
                   android:theme="@android:style/Theme.Black.NoTitleBar"
                   android:exported="true">
@@ -12,6 +12,8 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service android:name="nl.fixfl.autostart.StartService" />
 
         <receiver android:name="nl.fixfl.autostart.StartReceiver" android:exported="true">
             <intent-filter>

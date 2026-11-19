@@ -14,13 +14,14 @@ public class Starter {
         "(i=0;while [ ! -f " + HAX + "/fixflrun.sh ]&&[ $i -lt 90 ];do sleep 2;i=$((i+1));done;" +
         "sh " + HAX + "/fixflrun.sh)>/dev/null 2>&1 &";
 
-    // Diagnostic: append "<uptime> <event>" to HAX/fixboot.log so we can see which broadcasts really arrive.
+    // Diagnostic: append "<uptime> <event>" to HAX/fixflrun.log so we can see which broadcasts really arrive.
     public static void log(String event) throws NativeException {
         String e = event == null ? "?" : event.replaceAll("[^A-Za-z0-9_.]", "");
-        Shell.exec("echo \"$(cat /proc/uptime) " + e + "\" >> " + HAX + "/fixboot.log");
+        Shell.exec("echo \"$(cat /proc/uptime) " + e + "\" >> " + HAX + "/fixflrun.log");
     }
 
     public static void start() throws NativeException {
+        log("Starter_start()");
         if (SCRIPT.length() > 255)
             throw new NativeException("command too long");
         Shell.exec(SCRIPT);

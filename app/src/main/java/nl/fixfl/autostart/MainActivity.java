@@ -11,7 +11,7 @@ public class MainActivity extends Activity {
         String msg;
         try {
             Starter.start();
-            msg = "FixFl start requested.\n\nIt will also start by itself at boot and after wake-up.\n\nExpected files on the SD card:\nHAX/fixfl.sh, HAX/fixfl";
+            msg = "Watcher start requested.\n\nIt will also start by itself at boot and after wake-up.\n\nExpected files on the SD card:\nHAX/fixboot.sh, HAX/fixwatch.sh, HAX/fixfl";
         } catch (Throwable t) {
             msg = "Start failed: " + t;
         }

@@ -1,28 +1,64 @@
 package nl.fixfl.autostart;
 
+import android.os.Environment;
+
 import com.github.ma1co.openmemories.tweak.NativeException;
 import com.github.ma1co.openmemories.tweak.Shell;
 
+import java.io.File;
+
 public class Starter {
-    // Paths as seen from the camera's Linux side (outside the Android chroot).
-    static final String HAX = "/android/storage/sdcard0/HAX";
+    // The camera's SteadyShot focal length (mm, u16 little endian) lives in the Backup store under this id.
+    // Android apps can't read it, so a tiny root loop samples it into a file once a second.
+    // The file goes on /dev, which is RAM (the Android side has no /tmp, and its /data is flash).
+    // Root sees it as /android/dev/ss, the app (inside the Android chroot) as /dev/ss.
+    // A pid file keeps a second loop from being started. The whole command must stay under 255 characters
+    // (limit of the root exec call).
+    static final File SAMPLE_FILE = new File("/dev/ss");
+    static final String SAMPLER =
+        "read p</android/dev/ss.p;if [ -n \"$p\" ]&&[ -d /proc/$p ];then :;else " +
+        "(while :;do /usr/bin/bk.elf r 10713ca>/android/dev/ss.t 2>&1;mv /android/dev/ss.t /android/dev/ss;sleep 1;done)" +
+        ">/dev/null 2>&1 &echo $!>/android/dev/ss.p;fi";
 
-    // Runs in the background as root: wait for the SD card, install the helper, start the watcher once.
-    // The root exec call (shell_exec_async) rejects commands longer than 255 characters, so this stays
-    // short: wait for the SD card, then hand over to HAX/fixboot.sh, which does the real work.
-    static final String SCRIPT =
-        "(i=0;while [ ! -f " + HAX + "/fixboot.sh ]&&[ $i -lt 90 ];do sleep 2;i=$((i+1));done;" +
-        "sh " + HAX + "/fixboot.sh)>/dev/null 2>&1 &";
-
-    // Diagnostic: append "<uptime> <event>" to HAX/fixboot.log so we can see which broadcasts really arrive.
-    public static void log(String event) throws NativeException {
-        String e = event == null ? "?" : event.replaceAll("[^A-Za-z0-9_.]", "");
-        Shell.exec("echo \"$(cat /proc/uptime) " + e + "\" >> " + HAX + "/fixboot.log");
+    public static void startSampler() throws NativeException {
+        if (SAMPLER.length() > 255)
+            throw new NativeException("command too long");
+        Shell.exec(SAMPLER);
     }
 
-    public static void start() throws NativeException {
-        if (SCRIPT.length() > 255)
-            throw new NativeException("command too long");
-        Shell.exec(SCRIPT);
+    /** Stops the sampler loop and clears its files (the supervisor starts a new one). */
+    public static void stopSampler() throws NativeException {
+        Shell.exec("read p</android/dev/ss.p;[ -n \"$p\" ]&&kill $p;rm -f /android/dev/ss /android/dev/ss.t /android/dev/ss.p");
+    }
+
+    /** Root of the SD card as the Android side sees it, or null while no card with a DCIM folder is there. */
+    public static File sdRoot() {
+        File[] candidates = {
+            new File("/storage/sdcard0"), new File("/mnt/sdcard"), Environment.getExternalStorageDirectory()
+        };
+        for (File c : candidates)
+            if (c != null && new File(c, "DCIM").isDirectory()) return c;
+        return null;
+    }
+
+    // Files live in the root of the SD card. If the card refuses to create files there (some firmware
+    // only lets apps write inside certain folders) the log falls back to HAX/ and says so.
+    static volatile boolean rootWritable = true;
+
+    static File logFile(File sd) {
+        return rootWritable ? new File(sd, "fixfl.log") : new File(sd, "HAX/fixfl.log");
+    }
+
+    /** Candidate lens profile files, in order of preference. */
+    static File[] lensFiles(File sd) {
+        return new File[] {new File(sd, "lenses.ini"), new File(sd, "HAX/lenses.ini")};
+    }
+
+    /** The log file to show/read: whichever exists (root first). */
+    static File existingLog(File sd) {
+        File a = new File(sd, "fixfl.log");
+        if (a.isFile()) return a;
+        File b = new File(sd, "HAX/fixfl.log");
+        return b.isFile() ? b : a;
     }
 }

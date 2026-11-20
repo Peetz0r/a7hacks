@@ -2,11 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
 
     <application android:persistent="true" android:label="@string/app_name" android:icon="@drawable/ic_launcher">
         <activity android:name="nl.fixfl.autostart.MainActivity"
                   android:label="@string/app_name"
-                  android:theme="@android:style/Theme.Black.NoTitleBar"
+                  android:theme="@android:style/Theme.Light"
                   android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

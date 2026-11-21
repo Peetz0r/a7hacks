@@ -1,0 +1,62 @@
+The camera's pictures with lettering in them (ILCE-7M2 firmware 4.01)
+
+Many things the camera shows as "text" are pictures Sony drew in Univers: the focal lengths in the SteadyShot
+list, the menu page numbers, AWB, MF, ISO, the creative style names, the drive mode numbers, ... They live in
+/usr/share/app/image_*.uxc, which the UI (im.elf) maps. These scripts find the lettering in them and draw it
+again in Comic Relief Bold; the font patcher (liba7hacks.so --font-patcher) then writes the new pictures over the old ones in the camera's
+in-memory copy of those files, like the font.
+
+The .uxc picture files
+  "uxd\x07" header, then tables of 20-byte records: u32 id (0x1a......), u32 flags (0xe0000000 = a compressed
+  picture; 0xe8000000 = something else, left alone), u16 width, u16 height, u32 length, u32 offset. The
+  picture's data starts at (the record's own position + 4 + offset) and is length bytes long.
+  The data is Sony's LZ77 (the one their firmware updates use, cf. the Linux kernel's lib/lz77 and fwtool's
+  lz77 module): blocks of up to 4096 output bytes, each a type byte 0xf0 then groups of a flag byte (bit
+  0 first: 0 = one literal byte, 1 = a match of two bytes: length code in the high nibble, lengths 3..16, 32,
+  64; distance 1..4095 in the other 12 bits) and ending with a match of distance 0.
+  The output (unpacked by the camera's hardware LZ77 unit, /dev/ldec) is the picture as the GPU wants it:
+  RGBA4444 (grey in R, G and B), width and height rounded up to 8, in 8x8 tiles row by row, the pixels in each
+  tile in Morton order, rows top down.
+
+Scripts
+  uxc.py      reads the records and unpacks pictures
+  lz.py       the LZ77 decoder, and an encoder for the same format (greedy, a bit tighter than Sony's)
+  tile.py     8x8 Morton tiles to rows and back
+  ocr.py      finds lettering: splits a picture into light (or dark) shapes and matches each against Univers
+              and two condensed sans fonts; groups them into lines of text
+  confirm.py  has Tesseract read every line found, from just the shapes matched; mkpics keeps the lines where
+              both agree
+  render.py   erases a line (its fill, edge and shadow) and draws it in Comic Relief Bold over the same place:
+              same height (caps / x-height per run of characters), natural width where there is room around
+              it, squeezed (to 0.62 at most, then smaller) where there isn't; the same fill grey, dark edge and
+              soft shadow as the original, measured from it
+  mkpics.py   builds image_*.uxc.pics.json: per picture, only the pixels we drew (in the camera's order),
+              the length and hash of the new picture packed by ../../uxclz.c (quick mode where it fits,
+              else the cheapest), and a hash of the original; Sony's own pixels are not in it
+  mkpicheader.py  turns those into ../../picpatch.h for a7hacks.c (the font patcher unpacks the original from the file in RAM,
+              puts our pixels in, packs it and writes it only if length and hash come out as computed here)
+  overrides.py  lines whose reading is settled another way, used by mkpics: a person's reading from the
+              review page (answers.json; only where it fits the shapes found), or a word confirmed
+              elsewhere in the pictures (only if it differs in one letter at most, never a digit), or listed in
+              its KNOWN table (the menu's page numbers, which the scan misses or misreads)
+  badges.py   the creative style badges (Std., Vivid, ... and their numbered versions 1-6): made from
+              their shapes, a fixed set of words in a fixed layout (used by overrides.py); likewise the D-R,
+              DRO and HDR boxes; OFF and AUTO beside an icon are settled there too
+  answers.json  the review page's answers: per group, what Tesseract and the shapes read, and what it reads
+  hue.py      the accent colour: Sony's orange turned HUE degrees (env HUE, default 75: green), as a table
+              RGB444 -> RGB444 for the warm colours, applied to the pictures that use the orange accent
+              (not photos, not the red ones, not the gold auto-mode icons); the camera applies the same
+              table (pic_hue in picpatch.h) to pictures marked with the top bit of _raw. HUE=0: no change
+  qa.py       before/after sheets for checking by eye (buildc: in colour; about half the pictures are
+              coloured, the orange 'selected' ones, and render.py keeps their colours)
+
+  cc -O2 -DUXCLZ_MAIN -x c -o uxclz ../../uxclz.c
+  python3 scan.py; python3 confirm.py; python3 overrides.py; python3 mkpics.py
+  python3 mkpicheader.py ../../picpatch.h PC image_cmn_43.uxc.pics.json PE image_EVF.uxc.pics.json \
+      PD image_DSLR_Only_43.uxc.pics.json PS image_DSC_Only_43.uxc.pics.json
+  (UXCAPP: the folder with the camera's image_*.uxc; UNIVERS: the camera's Univers as a .ttf)
+
+Left alone: lines where the readings disagree and nobody settled them, lettering cut out of a box (the shapes
+found aren't its letters), and lettering next to lettering that wasn't confirmed (half a label would be worse
+than none). Light lettering on an opaque box (the creative style badges) is drawn when it has three letters or
+more; the box inside gets its own colour back where the old letters were.

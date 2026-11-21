@@ -1,0 +1,362 @@
+[
+ {
+  "group": "024c99062a7b",
+  "tesseract": "+43",
+  "shapes": "+4B3",
+  "reads": "4.3"
+ },
+ {
+  "group": "027b03a4c3b3",
+  "tesseract": "BZO0OM",
+  "shapes": "nZOOM",
+  "reads": "! ZOOM"
+ },
+ {
+  "group": "02d0165b940d",
+  "tesseract": "+25",
+  "shapes": "+2B5",
+  "reads": "+2.5"
+ },
+ {
+  "group": "0402a183f79c",
+  "tesseract": "Box",
+  "shapes": "eoN",
+  "reads": "ON"
+ },
+ {
+  "group": "06158b5bd567",
+  "tesseract": "Le",
+  "shapes": "LeJ",
+  "reads": null
+ },
+ {
+  "group": "072430996e02",
+  "tesseract": "21M",
+  "shapes": "2JM",
+  "reads": "21M"
+ },
+ {
+  "group": "07456b970270",
+  "tesseract": "HBULB",
+  "shapes": "nBULB",
+  "reads": "! BULB"
+ },
+ {
+  "group": "1098941aeb6b",
+  "tesseract": "Ose",
+  "shapes": "rusB",
+  "reads": "USB"
+ },
+ {
+  "group": "1683b5db7f2a",
+  "tesseract": "AlS",
+  "shapes": "-A",
+  "reads": "AF-S"
+ },
+ {
+  "group": "173af1943ad2",
+  "tesseract": "XYZ",
+  "shapes": "xYzI",
+  "reads": "XYZ"
+ },
+ {
+  "group": "1a1a6f6f24cd",
+  "tesseract": "49",
+  "shapes": "4a9",
+  "reads": "4.9"
+ },
+ {
+  "group": "1b3841d09c3a",
+  "tesseract": "+30",
+  "shapes": "+3B0",
+  "reads": "+3.0"
+ },
+ {
+  "group": "2167d5b33997",
+  "tesseract": "Mint",
+  "shapes": "MInI",
+  "reads": "Mini"
+ },
+ {
+  "group": "273e9704c8cc",
+  "tesseract": "1/7",
+  "shapes": "1B7",
+  "reads": "1.7"
+ },
+ {
+  "group": "2aaae9e344cc",
+  "tesseract": "P/A/i1",
+  "shapes": "P/A/oxO",
+  "reads": "P/A/"
+ },
+ {
+  "group": "2ba7737e33c6",
+  "tesseract": "+40",
+  "shapes": "+4B0",
+  "reads": "+4.0"
+ },
+ {
+  "group": "311246dfc00d",
+  "tesseract": "+33",
+  "shapes": "+3B3",
+  "reads": "+3.3"
+ },
+ {
+  "group": "3b0173d5a0ab",
+  "tesseract": "Le",
+  "shapes": "EoJ",
+  "reads": null
+ },
+ {
+  "group": "3d90b615fb73",
+  "tesseract": "Roo",
+  "shapes": "Bncc",
+  "reads": "OFF"
+ },
+ {
+  "group": "4167bc72c61a",
+  "tesseract": "1S0FFF",
+  "shapes": "-RHBI",
+  "reads": "ISO HI"
+ },
+ {
+  "group": "4c24ea1b5e2d",
+  "tesseract": "P/A/S/M/1G3",
+  "shapes": "P/A/S/M/oxO",
+  "reads": "P/A/S/M/"
+ },
+ {
+  "group": "4ea440e5729c",
+  "tesseract": "Nir",
+  "shapes": "NtrI",
+  "reads": "Ntrl"
+ },
+ {
+  "group": "60ab517f06c6",
+  "tesseract": "BI-BR-14",
+  "shapes": "-DBDBBJ",
+  "reads": null
+ },
+ {
+  "group": "60c9feeb7b9a",
+  "tesseract": "33",
+  "shapes": "3B3",
+  "reads": "3.3"
+ },
+ {
+  "group": "62ecf4e5b343",
+  "tesseract": "67",
+  "shapes": "6B7",
+  "reads": "6.7"
+ },
+ {
+  "group": "660c99410346",
+  "tesseract": "+17",
+  "shapes": "+1B7",
+  "reads": "+1.7"
+ },
+ {
+  "group": "7563987fd84f",
+  "tesseract": "P/A/S/iG3",
+  "shapes": "P/A/S/oxO",
+  "reads": "P/A/S/"
+ },
+ {
+  "group": "765575788acb",
+  "tesseract": "H8OF",
+  "shapes": "nBOFF",
+  "reads": "! OFF"
+ },
+ {
+  "group": "77556afa9f5e",
+  "tesseract": "52",
+  "shapes": "5B2",
+  "reads": "5.2"
+ },
+ {
+  "group": "81087de4ebc4",
+  "tesseract": "90m",
+  "shapes": "9N0M",
+  "reads": "9.0M"
+ },
+ {
+  "group": "83b4593e9e2e",
+  "tesseract": "63",
+  "shapes": "6B3",
+  "reads": "6.3"
+ },
+ {
+  "group": "8963b0fc98c0",
+  "tesseract": "+35",
+  "shapes": "+3B5",
+  "reads": "+3.5"
+ },
+ {
+  "group": "8991fd021160",
+  "tesseract": "BLens",
+  "shapes": "nLens",
+  "reads": "! Lens"
+ },
+ {
+  "group": "8dfb4548aabf",
+  "tesseract": "EHDR",
+  "shapes": "n-BB",
+  "reads": "! HDR"
+ },
+ {
+  "group": "8edac9ee38e4",
+  "tesseract": "HOR",
+  "shapes": "HDR",
+  "reads": "HDR"
+ },
+ {
+  "group": "92e02b7c4a0e",
+  "tesseract": "05",
+  "shapes": "0B5",
+  "reads": "0.5"
+ },
+ {
+  "group": "9b4ad515af3c",
+  "tesseract": "49",
+  "shapes": "4B9",
+  "reads": "4.9"
+ },
+ {
+  "group": "9d2230f4e0e3",
+  "tesseract": "+45",
+  "shapes": "+4B5",
+  "reads": "+4.5"
+ },
+ {
+  "group": "9e8139d43520",
+  "tesseract": "03",
+  "shapes": "0B3",
+  "reads": "0.3"
+ },
+ {
+  "group": "a05d68bc59cc",
+  "tesseract": "Hie",
+  "shapes": "n-o",
+  "reads": "! ISO"
+ },
+ {
+  "group": "a1cf9d7bfedf",
+  "tesseract": "OGN",
+  "shapes": "SCN",
+  "reads": "SCN"
+ },
+ {
+  "group": "a847d8b9bcfd",
+  "tesseract": "gv",
+  "shapes": "BLv",
+  "reads": "Lv 28"
+ },
+ {
+  "group": "b5dd0ce3d644",
+  "tesseract": "BP/A/S/M",
+  "shapes": "nP/A/S/M",
+  "reads": "! P/A/S/M"
+ },
+ {
+  "group": "b902f11f9c98",
+  "tesseract": "AUTO/AUTO",
+  "shapes": "AUTO/AUTO+",
+  "reads": "AUTO/AUTO+"
+ },
+ {
+  "group": "b944ec70c4fa",
+  "tesseract": "BRKI",
+  "shapes": "BRKj",
+  "reads": "BRK"
+ },
+ {
+  "group": "d3b2cc90c44b",
+  "tesseract": "17",
+  "shapes": "1B7",
+  "reads": "1.7"
+ },
+ {
+  "group": "e098c26fba78",
+  "tesseract": "GG",
+  "shapes": "eO",
+  "reads": null
+ },
+ {
+  "group": "e3016e0a968c",
+  "tesseract": "aS",
+  "shapes": "nOB",
+  "reads": "!"
+ },
+ {
+  "group": "e4510a6f76d2",
+  "tesseract": "ct",
+  "shapes": "C+",
+  "reads": "C"
+ },
+ {
+  "group": "e51056a9367b",
+  "tesseract": "433",
+  "shapes": "-J",
+  "reads": "4:3"
+ },
+ {
+  "group": "e6a07e5243e0",
+  "tesseract": "Box",
+  "shapes": "e0N",
+  "reads": "ON"
+ },
+ {
+  "group": "e6a17373382a",
+  "tesseract": "71",
+  "shapes": "7B1",
+  "reads": "7.1"
+ },
+ {
+  "group": "eb8df0928935",
+  "tesseract": "fe",
+  "shapes": "EoJ",
+  "reads": null
+ },
+ {
+  "group": "ec6962bc458f",
+  "tesseract": "BRAW",
+  "shapes": "nRAW",
+  "reads": "! RAW"
+ },
+ {
+  "group": "f0c3b01c3eab",
+  "tesseract": "47",
+  "shapes": "4B7",
+  "reads": "4.7"
+ },
+ {
+  "group": "f8bebc867fe4",
+  "tesseract": "BBRAW/RAW+",
+  "shapes": "nRAW/RAW+J",
+  "reads": "! RAW/RAW+J"
+ },
+ {
+  "group": "f94470e82360",
+  "tesseract": "32M",
+  "shapes": "3a2M",
+  "reads": "3.2M"
+ },
+ {
+  "group": "fae444345e65",
+  "tesseract": "56",
+  "shapes": "5B6",
+  "reads": "5.6"
+ },
+ {
+  "group": "fed3a6e63217",
+  "tesseract": "ISOu",
+  "shapes": "ISOJ",
+  "reads": "ISO"
+ },
+ {
+  "group": "ff676c3eb512",
+  "tesseract": "07",
+  "shapes": "0B7",
+  "reads": "0.7"
+ }
+]

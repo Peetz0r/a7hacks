@@ -1,0 +1,17 @@
+Comic Relief lettering for the camera's icon font (/usr/share/app/Sony_DI_Icons.ttf)
+
+The icons draw their lettering (AWB, MF, ISO, PP1 ...) as plain outline contours. These scripts find
+those letters and swap them for Comic Relief Bold ones, each icon staying inside its own bytes:
+
+  export ICONS=Sony_DI_Icons.ttf  LTT=UniversOTS-SJ_wIcon.ltt   # the camera's own files (not included)
+  export COMIC=ComicRelief-Bold.ttf                               # SIL Open Font License 1.1
+  python3 shapes.py     # every icon split into shapes (a contour and the contours right inside it)
+  python3 classify.py   # each shape compared with letters of a few reference fonts (Univers from LTT, plus
+                        # DejaVu Sans Condensed Bold, Liberation Sans Narrow Bold, Carlito Bold if installed)
+  python3 runs.py       # only shapes standing in a line of text count as letters
+  python3 icons.py      # icons.ttf (to look at), icons.patch.json (for ../mkheader.py)
+  python3 pages.py      # optional: page*.png, before/after sheets of every changed icon
+
+fixshapes.json holds corrections made by eye ("glyph:contour": letter, or null for "not a letter").
+Icons whose letters are very narrow (video formats like 1080/60p) or whose Comic version doesn't fit
+in the icon's bytes keep their own lettering, as do plain bars (I, 1, the stem of an i).

@@ -1,8 +1,8 @@
 import struct, numpy as np, sys
-sys.path.insert(0, __import__('os').path.dirname(__import__('os').path.abspath(__file__)))
+sys.path.insert(0, '/tmp/claude-0/-home-claude/4ec12a3c-3e1f-5f1d-94ea-74196235f400/scratchpad/uxc')
 from lz import decode
 from tile import untile
-APP = __import__('os').environ.get('UXCAPP', '/home/claude/flash/out/nflasha15_unpacked_unpacked/share/app/')   # the camera's /usr/share/app
+APP = '/home/claude/flash/out/nflasha15_unpacked_unpacked/share/app/'
 def records(fn):
     f = open(APP + fn, 'rb').read()
     a = np.frombuffer(f[:len(f) // 4 * 4], dtype='<u4')
@@ -11,11 +11,13 @@ def records(fn):
     for k in idx:
         ro = int(k) * 4
         rid, fl, size, ln, off = struct.unpack_from('<5I', f, ro)
+        if fl >> 24 == 0xe8:     # a stretchable picture (highlight bars, boxes): 5 more words before its length, offset
+            ln, off = struct.unpack_from('<2I', f, ro + 32)
         out.append(dict(ro=ro, id=rid, res=(rid & 0xffffff) | 0x02000000, flags=fl, w=size & 0xffff, h=size >> 16, len=ln, off=off))
     return f, out
 def picture(f, r):
     """upright (top row first) RGBA4444 array h x w, or None"""
-    if r['flags'] >> 24 != 0xe0: return None
+    if r['flags'] >> 24 not in (0xe0, 0xe8): return None
     d = f[r['ro'] + 4 + r['off']: r['ro'] + 4 + r['off'] + r['len']]
     aw, ah = (r['w'] + 7) & ~7, (r['h'] + 7) & ~7
     raw = decode(d, aw * ah * 2)

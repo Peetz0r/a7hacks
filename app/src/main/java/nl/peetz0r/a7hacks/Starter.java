@@ -176,9 +176,9 @@ public class Starter {
         return null;
     }
 
-    /** Candidate lens profile files, in order of preference. */
-    static File[] lensFiles(File sd) {
-        return new File[] {new File(sd, "lenses.ini"), new File(sd, "HAX/lenses.ini")};
+    /** The settings file: a7hacks.ini in the root of the SD card. */
+    static File[] configFiles(File sd) {
+        return new File[] {new File(sd, "a7hacks.ini")};
     }
 
     /**

@@ -21,12 +21,12 @@ public class StartService extends Service {
     static volatile long lastLabelTry = 0;
     static volatile long lastFontTry = 0;
     static volatile long lastClockTry = 0;
-    /** From lenses.ini [camera] font: true = Comic Relief, false = the camera's own; null until lenses.ini is read. */
+    /** From a7hacks.ini [config] font: true = Comic Relief, false = the camera's own; null until a7hacks.ini is read. */
     static volatile Boolean fontWanted = null;
-    /** From lenses.ini [camera] icons: false = keep the icons' own lettering. */
+    /** From a7hacks.ini [config] icons: false = keep the icons' own lettering. */
     static volatile boolean iconsWanted = true;
     static volatile boolean restartRequested = false;
-    /** Lens profiles from lenses.ini, read once (again after Restart); null until read. */
+    /** Lens profiles from a7hacks.ini, read once (again after Restart); null until read. */
     static volatile TreeMap<Integer, LensProfiles.Profile> profiles = null;
 
     // Java-side log of service events (start, failures) in the app's private storage, not on the SD card.
@@ -73,7 +73,7 @@ public class StartService extends Service {
 
     /**
      * Restart button: stops the root sampler and all three liba7hacks.so loops (--exposure-patcher, --label-patcher, --font-patcher); the
-     * supervisor then starts new ones, reads lenses.ini again (so a changed font or icons option takes effect)
+     * supervisor then starts new ones, reads a7hacks.ini again (so a changed font or icons option takes effect)
      * and writes the lens info afresh. Call from a background thread (the root exec call may block briefly).
      */
     static void restart(Context ctx) {
@@ -108,22 +108,28 @@ public class StartService extends Service {
         synchronized (StartService.class) { lastStart = 0; }
     }
 
-    /** Reads lenses.ini once the SD card is there. Returns false while there is no card. */
+    /** A [config] option: on (the default) or off; anything else is logged and counts as on. */
+    private static boolean onOff(java.util.Map<String, String> options, String key) {
+        String v = options.get(key);
+        if (v == null || v.equals("on")) return true;
+        if (v.equals("off")) return false;
+        AppLog.add("a7hacks.ini: " + key + " = " + v + "? (on or off), using on");
+        return true;
+    }
+
+    /** Reads a7hacks.ini once the SD card is there. Returns false while there is no card. */
     static boolean loadProfiles() {
         File sd = Starter.sdRoot();
         if (sd == null) return false;
-        File[] files = Starter.lensFiles(sd);
+        File[] files = Starter.configFiles(sd);
         TreeMap<Integer, LensProfiles.Profile> p = LensProfiles.loadAll(files);
-        String font = LensProfiles.loadOptions(files).get("font");
-        String icons = LensProfiles.loadOptions(files).get("icons");
-        iconsWanted = !(icons != null && (icons.equalsIgnoreCase("original") || icons.equalsIgnoreCase("off")
-            || icons.equalsIgnoreCase("univers") || icons.equalsIgnoreCase("sony")));
-        fontWanted = !(font != null && (font.equalsIgnoreCase("univers") || font.equalsIgnoreCase("off")
-            || font.equalsIgnoreCase("original")));
+        java.util.Map<String, String> options = LensProfiles.loadOptions(files);
+        fontWanted = onOff(options, "font");
+        iconsWanted = onOff(options, "icons");
         profiles = p;
         File used = null;
         for (File f : files) if (f.isFile()) { used = f; break; }
-        AppLog.add(used == null ? "no lenses.ini on the SD card" : "read " + used.getName() + ": " + p.size() + " lenses");
+        AppLog.add(used == null ? "no a7hacks.ini on the SD card" : "read " + used.getName() + ": " + p.size() + " lenses");
         return true;
     }
 
@@ -261,7 +267,7 @@ public class StartService extends Service {
                         labelKind = kind;
                     }
                 }
-                // 1d. UI font, once lenses.ini has been read (it can switch it off)
+                // 1d. UI font, once a7hacks.ini has been read (it can switch it off)
                 Boolean fw = fontWanted;
                 String ft = Starter.fontStatus();
                 if (fw != null && !fontStopped) {
@@ -345,9 +351,9 @@ public class StartService extends Service {
                         fontKind = kind;
                     }
                 }
-                // 2. lenses.ini, once the card is there
+                // 2. a7hacks.ini, once the card is there
                 if (profiles == null && !loadProfiles() && !loggedWaitSd) {
-                    AppLog.add("waiting for the SD card (for lenses.ini)");
+                    AppLog.add("waiting for the SD card (for a7hacks.ini)");
                     loggedWaitSd = true;
                 }
                 // 3. the lens info; without a card, start after 20 s with the focal length only

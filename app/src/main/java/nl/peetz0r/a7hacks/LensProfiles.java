@@ -10,7 +10,7 @@ import java.util.Map;
 import java.util.TreeMap;
 
 /**
- * Lens profiles, keyed by the SteadyShot focal length in mm. INI-style text file, lenses.ini in the root of the SD card:
+ * Lens profiles, keyed by the SteadyShot focal length in mm. INI-style text file, a7hacks.ini in the root of the SD card:
  *
  *   # lines starting with # are ignored
  *   [135]
@@ -20,13 +20,13 @@ import java.util.TreeMap;
  * model -> EXIF LensModel (at most 64 bytes), aperture -> MaxApertureValue. Both are optional; the focal length
  * itself always comes from the section name. Other keys are ignored.
  *
- * Camera options go in a [camera] section:
+ * Options go in a [config] section, each on (the default) or off:
  *
- *   [camera]
- *   font = comic        # menu font: comic (Comic Relief, the default) or univers (the camera's own)
- *   icons = comic       # lettering inside the icons and the camera's pictures (AWB, MF, ISO, focal lengths,
- *                       # page numbers, ...): comic (the default, with font = comic) or original; changing
- *                       # either takes effect at the next start of the camera
+ *   [config]
+ *   font = on           # the menu font: Comic Relief (off: the camera's own)
+ *   icons = on          # lettering inside the icons and the camera's pictures (AWB, MF, ISO, focal lengths,
+ *                       # page numbers, ...) in Comic Relief, with font = on; changing either takes effect at
+ *                       # the next start of the camera
  */
 public final class LensProfiles {
     public static final class Profile {
@@ -67,7 +67,7 @@ public final class LensProfiles {
         return map;
     }
 
-    /** The keys of the [camera] section (lower case), or an empty map. */
+    /** The keys of the [config] section (lower case), or an empty map. */
     public static Map<String, String> parseOptions(String text) {
         Map<String, String> map = new HashMap<String, String>();
         boolean in = false;
@@ -75,7 +75,7 @@ public final class LensProfiles {
             String line = raw.trim();
             if (line.length() == 0 || line.startsWith("#")) continue;
             if (line.startsWith("[") && line.endsWith("]")) {
-                in = line.substring(1, line.length() - 1).trim().equalsIgnoreCase("camera");
+                in = line.substring(1, line.length() - 1).trim().equalsIgnoreCase("config");
                 continue;
             }
             int eq = line.indexOf('=');
@@ -88,7 +88,7 @@ public final class LensProfiles {
         return map;
     }
 
-    /** The [camera] options from the first of these files that exists; empty if none. */
+    /** The [config] options from the first of these files that exists; empty if none. */
     public static Map<String, String> loadOptions(File[] files) {
         String text = readFirst(files);
         return text == null ? new HashMap<String, String>() : parseOptions(text);

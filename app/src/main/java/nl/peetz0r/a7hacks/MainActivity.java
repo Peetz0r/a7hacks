@@ -191,7 +191,7 @@ public class MainActivity extends Activity {
         try { return Integer.parseInt(s.trim()); } catch (NumberFormatException e) { return -1; }
     }
 
-    /** Every lens from lenses.ini by focal length; the current one highlighted, an undefined one added in red. */
+    /** Every lens from a7hacks.ini by focal length; the current one highlighted, an undefined one added in red. */
     private void fillLenses(TreeMap<Integer, LensProfiles.Profile> profiles, int mm) {
         lensTable.removeAllViews();
         TreeMap<Integer, String> rows = new TreeMap<Integer, String>();
@@ -207,7 +207,7 @@ public class MainActivity extends Activity {
             TextView t = new TextView(this);
             t.setTextSize(15);
             Fonts.comic(t, false);
-            t.setText(profiles == null ? "Waiting for the SD card" : "No lenses in lenses.ini");
+            t.setText(profiles == null ? "Waiting for the SD card" : "No lenses in a7hacks.ini");
             lensTable.addView(t);
             return;
         }

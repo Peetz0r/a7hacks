@@ -18,7 +18,7 @@ def fnv(b):
     return h
 def fixed(p, lines):
     q = clean(p)
-    for l in lines: q = redraw(q, dict(light=l['light'], boxes=l['boxes'], mbox=l.get('mbox')))
+    for l in lines: q = redraw(q, dict(light=l['light'], boxes=l['boxes'], mbox=l.get('mbox'), span=l.get('span')))
     return q
 def to_raw(q):
     h, w = q.shape; aw, ah = (w + 7) & ~7, (h + 7) & ~7

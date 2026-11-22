@@ -161,5 +161,16 @@ for h, s_ in sl.items():
     if (byh[h]['fn'], byh[h]['res']) in DIMMED: out[h] = [dict(exclusive=True, settled='leave')]; continue
     L = badges.lines_for(byh[h]['pic'], s_['lines'])
     if L: out[h] = L; stats['badge'] += 1
+# pictures that take each other's place on screen: the same lettering, in the same place (the USB icon with the
+# circular arrows turns into the one with the lines beside it; Sony's "USB" doesn't move, so ours mustn't either)
+import copy
+# span: the columns the lettering may take, fixed for both (the free span the one with the lines gets by itself;
+# the arrows leave the other one more room, and its letters came out wider)
+SAME = {('image_cmn_43.uxc', 0x205c5f5): (('image_cmn_43.uxc', 0x205c72b), (32, 84))}
+hof = {(v['fn'], v['res']): h for h, v in byh.items()}
+for t, (src, span) in SAME.items():
+    if t in hof and src in hof and out.get(hof[src]):
+        for l in out[hof[src]]: l['span'] = span
+        out[hof[t]] = copy.deepcopy(out[hof[src]]); stats['same'] += 1
 print(stats, 'pictures', len(out))
 pickle.dump(dict(out), open('overrides.pkl', 'wb'))

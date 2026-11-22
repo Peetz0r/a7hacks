@@ -159,7 +159,7 @@ def redraw(p, line):
             # the old faint shadow becomes clear (not a copy of a neighbour's edge); clear stays clear
             clear0 = E & (a0 < 8); K[:, clear0] = 0; a[clear0] = 0
         occ = (a >= 4) & ~D3
-        bx = line['boxes']; fr = freespan(occ, min(b[1] for b in bx), max(b[3] for b in bx), min(b[0] for b in bx), max(b[2] for b in bx), p.shape[1])
+        bx = line['boxes']; fr = tuple(line['span']) if line.get('span') else freespan(occ, min(b[1] for b in bx), max(b[3] for b in bx), min(b[0] for b in bx), max(b[2] for b in bx), p.shape[1])
         C = coverage(p.shape, [b[:5] for b in bx], fr)
         O = ndimage.grey_dilation(C, size=(3, 3)); S2 = ndimage.grey_dilation(C, size=(5, 5))
         O[others] = 0; S2[others] = 0                          # no edge or shadow over a neighbouring light shape
@@ -185,7 +185,7 @@ def redraw(p, line):
         bx = line['boxes']
         inside = ndimage.binary_fill_holes(ndimage.binary_dilation(M, iterations=2) | ((a >= 8) & (g >= 9)))
         occ = ~inside
-        fr = freespan(occ, min(b[1] for b in bx), max(b[3] for b in bx), min(b[0] for b in bx), max(b[2] for b in bx), p.shape[1], margin=False)
+        fr = tuple(line['span']) if line.get('span') else freespan(occ, min(b[1] for b in bx), max(b[3] for b in bx), min(b[0] for b in bx), max(b[2] for b in bx), p.shape[1], margin=False)
         C = coverage(p.shape, [b[:5] for b in bx], fr)
         K = np.stack([K[c] * (1 - C) + fg[c] * C for c in range(3)]); a = np.maximum(a, 15 * C)
     touched = (np.abs(K - K0) > 1e-3).any(axis=0) | (np.abs(a - a0) > 1e-3)     # pixels we changed (the others stay exactly)

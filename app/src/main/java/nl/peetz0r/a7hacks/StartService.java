@@ -1,4 +1,4 @@
-package nl.fixfl.autostart;
+package nl.peetz0r.a7hacks;
 
 import android.app.Service;
 import android.content.Context;
@@ -29,7 +29,7 @@ public class StartService extends Service {
     static volatile TreeMap<Integer, LensProfiles.Profile> profiles = null;
 
     // Java-side log of service events (start, failures) in the app's private storage, not on the SD card.
-    // Readable from the Linux side at /android/data/data/nl.fixfl.autostart/files/a7hacks.log
+    // Readable from the Linux side at /android/data/data/nl.peetz0r.a7hacks/files/a7hacks.log
     @SuppressWarnings("deprecation")
     static synchronized void jlog(Context c, String msg) {
         try {

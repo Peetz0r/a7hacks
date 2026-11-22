@@ -1,4 +1,4 @@
-package nl.fixfl.autostart;
+package nl.peetz0r.a7hacks;
 
 import android.app.Activity;
 import android.content.Intent;
@@ -18,9 +18,9 @@ import java.util.Map;
 import java.util.TreeMap;
 
 public class MainActivity extends Activity {
-    private static final int HIGHLIGHT = 0xFFFFD54F;   // current lens
-    private static final int UNKNOWN = 0xFFFF7043;     // current focal length has no entry
-    private static final String GAP = "    ";
+    private static final int HIGHLIGHT = 0xFF33B5E5;   // current lens: Holo blue (android.R.color.holo_blue_light)
+    private static final int UNKNOWN = 0xFFFF4444;     // current focal length has no entry: Holo red (holo_red_light)
+    private static final int GAP = 24;                 // between the focal length and the lens name (px)
 
     private TableLayout lensTable;
     private TextView logView;
@@ -70,9 +70,9 @@ public class MainActivity extends Activity {
         restart.setText("Restart");
         restart.setTextSize(16.5f);
         Fonts.comic(restart, false);
-        restart.setMinHeight(0);
-        restart.setMinWidth(0);
-        restart.setPadding(42, 0, 42, 0);
+        // the button's own height and vertical padding: squeezed below them, its background image (a nine-patch)
+        // gets drawn with its edges through the middle
+        restart.setPadding(42, restart.getPaddingTop(), 42, restart.getPaddingBottom());
         restart.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 new Thread() {
@@ -80,7 +80,8 @@ public class MainActivity extends Activity {
                 }.start();
             }
         });
-        bottom.addView(restart, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, 48));
+        bottom.addView(restart, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT));
         root.addView(bottom);
 
         setContentView(root);
@@ -154,16 +155,18 @@ public class MainActivity extends Activity {
             TextView num = new TextView(this);
             num.setTextSize(15);
             num.setGravity(Gravity.RIGHT);
-            num.setText(" " + e.getKey() + " mm");
+            num.setText(e.getKey() + " mm");
+            num.setPadding(6, 0, 0, 0);
             TextView name = new TextView(this);
             name.setTextSize(15);
+            name.setPadding(GAP, 0, 6, 0);      // padding, not spaces: a bold space is wider than a regular one
             Fonts.comic(num, false);
             Fonts.comic(name, false);
-            name.setText(GAP + e.getValue() + " ");
+            name.setText(e.getValue());
             if (cur) {
                 row.setBackgroundColor(unknown ? UNKNOWN : HIGHLIGHT);
-                num.setTextColor(0xFF000000);       // dark text on the bright highlight
-                name.setTextColor(0xFF000000);
+                num.setTextColor(0xFFFFFFFF);       // white on the blue, as Holo does
+                name.setTextColor(0xFFFFFFFF);
                 Fonts.comic(num, true);
                 Fonts.comic(name, true);
             }

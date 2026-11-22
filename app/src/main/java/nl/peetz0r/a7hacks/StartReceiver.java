@@ -1,4 +1,4 @@
-package nl.fixfl.autostart;
+package nl.peetz0r.a7hacks;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;

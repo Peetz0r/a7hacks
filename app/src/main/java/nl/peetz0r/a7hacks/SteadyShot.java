@@ -1,4 +1,4 @@
-package nl.fixfl.autostart;
+package nl.peetz0r.a7hacks;
 
 import java.io.File;
 import java.io.FileInputStream;

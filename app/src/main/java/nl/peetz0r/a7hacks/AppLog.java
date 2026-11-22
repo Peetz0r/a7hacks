@@ -1,4 +1,4 @@
-package nl.fixfl.autostart;
+package nl.peetz0r.a7hacks;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;

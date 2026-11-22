@@ -1,4 +1,4 @@
-package nl.fixfl.autostart;
+package nl.peetz0r.a7hacks;
 
 /**
  * Keeps the camera's manual-lens EXIF block in line with the SteadyShot setting: writes it when the setting

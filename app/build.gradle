@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace 'nl.fixfl.autostart'
+    namespace 'nl.peetz0r.a7hacks'
     compileSdk 34
 
     defaultConfig {
-        applicationId 'nl.fixfl.autostart'
+        applicationId 'nl.peetz0r.a7hacks'
         minSdk 10
         targetSdk 10
         versionCode 1

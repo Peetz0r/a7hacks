@@ -5,7 +5,7 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
 
     <application android:persistent="true" android:label="@string/app_name" android:icon="@drawable/ic_launcher">
-        <activity android:name="nl.fixfl.autostart.MainActivity"
+        <activity android:name="nl.peetz0r.a7hacks.MainActivity"
                   android:label="@string/app_name"
                   android:theme="@android:style/Theme.Holo"
                   android:exported="true">
@@ -15,9 +15,9 @@
             </intent-filter>
         </activity>
 
-        <service android:name="nl.fixfl.autostart.StartService" />
+        <service android:name="nl.peetz0r.a7hacks.StartService" />
 
-        <receiver android:name="nl.fixfl.autostart.StartReceiver" android:exported="true">
+        <receiver android:name="nl.peetz0r.a7hacks.StartReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>

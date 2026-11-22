@@ -156,45 +156,6 @@ static int picfind(u32 id) {
     return -1;
 }
 static int ispic(u32 id) { return picfind(id) >= 0; }
-/* The UI keeps the pictures it has unpacked (textures, in the GPU's layout: exactly the unpacked data) in its
- * label store, and a view that is alive keeps using its own (the menus' highlight bars, made at the factory
- * before the boot snapshot): those don't go when our picture comes in, so their pixels are brought up to date
- * where they are. entry: the store's entry for picture id (in process pid). Its texture: entry +0x18 -> +0x18
- * -> +4 -> a header: 0xabcdef, ..., +8 width | height << 16, ..., +0x18 the size in tiles (multiples of 8),
- * ..., +0x24 its physical address, +0x28 the picture's resource id. Only a texture that is exactly the
- * unpacked size of our picture, in RAM, gets written, only where it differs. 1 up to date, 0 not ours or not
- * a texture we know, -1 failed */
-static u8 tpage[4096];
-static int picpaint(int pid, u32 entry, u32 id) {
-    int ki = picfind(id);
-    if (ki < 0) return 0;
-    int k = ki >> 16, i = ki & 0xffff;
-    if (pbad[k][i] || picstate(k, i) != 1) return 0;
-    u8 w[4]; u32 a = entry;
-    static const u8 hops[3] = {0x18, 0x18, 4};
-    for (int h = 0; h < 3; h++) {
-        if (vrw(pid, a + hops[h], w, 4, 0) != 1) return 0;
-        a = rd32(w);
-        if (!a || (a & 3)) return 0;
-    }
-    u8 hd[0x2c];
-    if (vrw(pid, a, hd, sizeof hd, 0) != 1 || rd32(hd) != 0xabcdefu) return 0;
-    if ((rd32(hd + 0x28) & 0xffffff) != (id & 0xffffff)) return 0;
-    u32 dim = rd32(hd + 0x18), aw = dim & 0xffff, ah = dim >> 16, pa = rd32(hd + 0x24);
-    const struct pp *P = &pps[k];
-    u32 raw = P->raw[i] & 0x3fffffffu;
-    if (!aw || !ah || (aw & 7) || (ah & 7) || aw * ah * 2 != raw || raw > PIC_MAXRAW) return 0;
-    if (pa < RAM_LO || pa - RAM_LO > RAM_SIZE - raw) return 0;
-    if (lz_decode(P->map + P->off[i], (int)P->len[i], pbuf, (int)raw) != (int)raw) return -1;   /* ours, now */
-    for (u32 o = 0; o < raw; o += sizeof tpage) {
-        u32 n = raw - o < sizeof tpage ? raw - o : sizeof tpage;
-        if (pread_(pa + o, tpage, (int)n) < 0) return -1;
-        int same_ = 1;
-        for (u32 j = 0; j < n; j++) if (tpage[j] != pbuf[o + j]) { same_ = 0; break; }
-        if (!same_ && pwrite_(pa + o, pbuf + o, (int)n) < 0) return -1;
-    }
-    return 1;
-}
 
 /* The accent colour of text the UI draws itself (the orange headings, the "50mm" over the live view, ...): two
  * small tables the UI reads as it needs them, color_cmn.uxc (plain colours) and style_cmn.uxc (text styles: a

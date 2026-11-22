@@ -19,13 +19,13 @@
 static struct pp {
     const char *path; u32 size; const u8 *head; int count;
     const u32 *off, *len, *old, *nlen, *nhash, *raw, *run, *rlen; const u8 *runs;
-    const u32 *rid; int nrid;
+    const u32 *rid; int nrid; const u32 *rix;
     const u8 *map; u8 on;
 } pps[] = {
-    {PICDIR "image_cmn_43.uxc", PC_SIZE, pc_head, PC_COUNT, pc_off, pc_len, pc_old, pc_nlen, pc_new, pc_raw, pc_run, pc_rlen, pc_runs, pc_rid, PC_NRID, 0, 0},
-    {PICDIR "image_EVF.uxc", PE_SIZE, pe_head, PE_COUNT, pe_off, pe_len, pe_old, pe_nlen, pe_new, pe_raw, pe_run, pe_rlen, pe_runs, pe_rid, PE_NRID, 0, 0},
-    {PICDIR "image_DSLR_Only_43.uxc", PD_SIZE, pd_head, PD_COUNT, pd_off, pd_len, pd_old, pd_nlen, pd_new, pd_raw, pd_run, pd_rlen, pd_runs, pd_rid, PD_NRID, 0, 0},
-    {PICDIR "image_DSC_Only_43.uxc", PS_SIZE, ps_head, PS_COUNT, ps_off, ps_len, ps_old, ps_nlen, ps_new, ps_raw, ps_run, ps_rlen, ps_runs, ps_rid, PS_NRID, 0, 0},
+    {PICDIR "image_cmn_43.uxc", PC_SIZE, pc_head, PC_COUNT, pc_off, pc_len, pc_old, pc_nlen, pc_new, pc_raw, pc_run, pc_rlen, pc_runs, pc_rid, PC_NRID, pc_rix, 0, 0},
+    {PICDIR "image_EVF.uxc", PE_SIZE, pe_head, PE_COUNT, pe_off, pe_len, pe_old, pe_nlen, pe_new, pe_raw, pe_run, pe_rlen, pe_runs, pe_rid, PE_NRID, pe_rix, 0, 0},
+    {PICDIR "image_DSLR_Only_43.uxc", PD_SIZE, pd_head, PD_COUNT, pd_off, pd_len, pd_old, pd_nlen, pd_new, pd_raw, pd_run, pd_rlen, pd_runs, pd_rid, PD_NRID, pd_rix, 0, 0},
+    {PICDIR "image_DSC_Only_43.uxc", PS_SIZE, ps_head, PS_COUNT, ps_off, ps_len, ps_old, ps_nlen, ps_new, ps_raw, ps_run, ps_rlen, ps_runs, ps_rid, PS_NRID, ps_rix, 0, 0},
 };
 #define NPP ((int)(sizeof pps / sizeof pps[0]))
 static u8 pbad[NPP][PIC_MAXCOUNT];       /* pictures that didn't come out as expected: left alone */
@@ -141,56 +141,111 @@ static int picsnew(void) {
     }
     return n;
 }
-/* is id one of the pictures we change (in a file the font patcher looks after)? */
-static int ispic(u32 id) {
+/* is id one of the pictures we change (in a file the font patcher looks after)? -1 no, else k << 16 | i */
+static int picfind(u32 id) {
     for (int k = 0; k < NPP; k++) {
         if (!pps[k].on) continue;
         int lo = 0, hi = pps[k].nrid - 1;
-        while (lo <= hi) { int m = (lo + hi) >> 1; u32 v = pps[k].rid[m]; if (v == id) return 1; if (v < id) lo = m + 1; else hi = m - 1; }
+        while (lo <= hi) {
+            int m = (lo + hi) >> 1; u32 v = pps[k].rid[m];
+            if (v == id) return k << 16 | (int)pps[k].rix[m];
+            if (v < id) lo = m + 1; else hi = m - 1;
+        }
     }
-    return 0;
+    return -1;
 }
-static const u8 *colmap;
-static void picsreset(void) { for (int k = 0; k < NPP; k++) { pps[k].map = 0; pps[k].on = 0; } picflush = 0; colmap = 0; }
+static int ispic(u32 id) { return picfind(id) >= 0; }
+/* The UI keeps the pictures it has unpacked (textures, in the GPU's layout: exactly the unpacked data) in its
+ * label store, and a view that is alive keeps using its own (the menus' highlight bars, made at the factory
+ * before the boot snapshot): those don't go when our picture comes in, so their pixels are brought up to date
+ * where they are. entry: the store's entry for picture id (in process pid). Its texture: entry +0x18 -> +0x18
+ * -> +4 -> a header: 0xabcdef, ..., +8 width | height << 16, ..., +0x18 the size in tiles (multiples of 8),
+ * ..., +0x24 its physical address, +0x28 the picture's resource id. Only a texture that is exactly the
+ * unpacked size of our picture, in RAM, gets written, only where it differs. 1 up to date, 0 not ours or not
+ * a texture we know, -1 failed */
+static u8 tpage[4096];
+static int picpaint(int pid, u32 entry, u32 id) {
+    int ki = picfind(id);
+    if (ki < 0) return 0;
+    int k = ki >> 16, i = ki & 0xffff;
+    if (pbad[k][i] || picstate(k, i) != 1) return 0;
+    u8 w[4]; u32 a = entry;
+    static const u8 hops[3] = {0x18, 0x18, 4};
+    for (int h = 0; h < 3; h++) {
+        if (vrw(pid, a + hops[h], w, 4, 0) != 1) return 0;
+        a = rd32(w);
+        if (!a || (a & 3)) return 0;
+    }
+    u8 hd[0x2c];
+    if (vrw(pid, a, hd, sizeof hd, 0) != 1 || rd32(hd) != 0xabcdefu) return 0;
+    if ((rd32(hd + 0x28) & 0xffffff) != (id & 0xffffff)) return 0;
+    u32 dim = rd32(hd + 0x18), aw = dim & 0xffff, ah = dim >> 16, pa = rd32(hd + 0x24);
+    const struct pp *P = &pps[k];
+    u32 raw = P->raw[i] & 0x7fffffffu;
+    if (!aw || !ah || (aw & 7) || (ah & 7) || aw * ah * 2 != raw || raw > PIC_MAXRAW) return 0;
+    if (pa < RAM_LO || pa - RAM_LO > RAM_SIZE - raw) return 0;
+    if (lz_decode(P->map + P->off[i], (int)P->len[i], pbuf, (int)raw) != (int)raw) return -1;   /* ours, now */
+    for (u32 o = 0; o < raw; o += sizeof tpage) {
+        u32 n = raw - o < sizeof tpage ? raw - o : sizeof tpage;
+        if (pread_(pa + o, tpage, (int)n) < 0) return -1;
+        int same_ = 1;
+        for (u32 j = 0; j < n; j++) if (tpage[j] != pbuf[o + j]) { same_ = 0; break; }
+        if (!same_ && pwrite_(pa + o, pbuf + o, (int)n) < 0) return -1;
+    }
+    return 1;
+}
 
-/* The accent colour of text the UI draws itself (the orange headings, ...): color_cmn.uxc, a small table the
- * UI reads as it needs a colour. Its orange entries get the same hue as the pictures (picpatch.h: col_*), in the
- * camera's in-memory copy of the file (its page kept there while the font patcher runs); only if the file is exactly the one we
- * know. on: our colours, off: Sony's back. Returns how many entries are ours, or <0. */
-static int colours(int on) {
-    if (!COL_N) return 0;
-    if (!colmap) {
-        int h = sc(SYS_OPEN, (long)PICDIR "color_cmn.uxc", 0, 0, 0, 0);
+/* The accent colour of text the UI draws itself (the orange headings, the "50mm" over the live view, ...): two
+ * small tables the UI reads as it needs them, color_cmn.uxc (plain colours) and style_cmn.uxc (text styles: a
+ * colour and an outline). Their orange entries get the same hue as the pictures (picpatch.h: col_*, sty_*), in
+ * the camera's in-memory copy of the file (its page kept there while the font patcher runs); only if the file
+ * is exactly the one we know. on: our colours, off: Sony's back. Returns how many entries are ours, or <0. */
+static struct ct {
+    const char *path; u32 size, hash; int n; const u32 *off, *old, *nw; const u8 *map;
+} cts[] = {
+    {PICDIR "color_cmn.uxc", COL_SIZE, COL_HASH, COL_N, col_off, col_old, col_new, 0},
+    {PICDIR "style_cmn.uxc", STY_SIZE, STY_HASH, STY_N, sty_off, sty_old, sty_new, 0},
+};
+static int colours1(struct ct *C, int on) {
+    if (!C->n) return 0;
+    if (!C->map) {
+        int h = sc(SYS_OPEN, (long)C->path, 0, 0, 0, 0);
         if (h < 0) return -1;
         unsigned long long end = 0;
-        if (sc(SYS_LLSEEK, h, 0, 0, (long)&end, 2) < 0 || end != COL_SIZE) { sc(SYS_CLOSE, h, 0, 0, 0, 0); return -2; }
-        long a = sc6(SYS_MMAP2, 0, COL_SIZE, 1 /* PROT_READ */, 1 /* MAP_SHARED */, h, 0);
+        if (sc(SYS_LLSEEK, h, 0, 0, (long)&end, 2) < 0 || end != C->size) { sc(SYS_CLOSE, h, 0, 0, 0, 0); return -2; }
+        long a = sc6(SYS_MMAP2, 0, C->size, 1 /* PROT_READ */, 1 /* MAP_SHARED */, h, 0);
         sc(SYS_CLOSE, h, 0, 0, 0, 0);
         if ((unsigned long)a >= (unsigned long)-4095L) return -3;
-        sc(SYS_MLOCK, a, COL_SIZE, 0, 0, 0);
-        colmap = (const u8 *)a;
+        sc(SYS_MLOCK, a, C->size, 0, 0, 0);
+        C->map = (const u8 *)a;
     }
     /* the file as Sony made it, with ours put back: is it the one we know? */
-    u8 b[COL_SIZE];
-    for (u32 i = 0; i < COL_SIZE; i++) b[i] = colmap[i];
-    for (int k = 0; k < COL_N; k++) {
-        u32 v = colmap[col_off[k]] | colmap[col_off[k] + 1] << 8 | colmap[col_off[k] + 2] << 16 | (u32)colmap[col_off[k] + 3] << 24;
-        if (v != col_old[k] && v != col_new[k]) return -2;
-        for (int j = 0; j < 4; j++) b[col_off[k] + j] = (u8)(col_old[k] >> (8 * j));
+    static u8 b[4096];
+    if (C->size > sizeof b) return -2;
+    for (u32 i = 0; i < C->size; i++) b[i] = C->map[i];
+    for (int k = 0; k < C->n; k++) {
+        u32 v = rd32(C->map + C->off[k]);
+        if (v != C->old[k] && v != C->nw[k]) return -2;
+        wr32(b + C->off[k], C->old[k]);
     }
-    if (pfnv(b, COL_SIZE) != COL_HASH) return -2;
+    if (pfnv(b, C->size) != C->hash) return -2;
     int n = 0;
     hold(1);
-    for (int k = 0; k < COL_N; k++) {
-        u32 want = on ? col_new[k] : col_old[k];
-        u32 v = colmap[col_off[k]] | colmap[col_off[k] + 1] << 8 | colmap[col_off[k] + 2] << 16 | (u32)colmap[col_off[k] + 3] << 24;
-        if (v != want) {
-            u8 w[4] = { (u8)want, (u8)(want >> 8), (u8)(want >> 16), (u8)(want >> 24) };
-            if (vrw(mypid, (u32)(unsigned long)(colmap + col_off[k]), w, 4, 1) <= 0) { hold(0); return -3; }
+    for (int k = 0; k < C->n; k++) {
+        u32 want = on ? C->nw[k] : C->old[k];
+        if (rd32(C->map + C->off[k]) != want) {
+            u8 w[4]; wr32(w, want);
+            if (vrw(mypid, (u32)(unsigned long)(C->map + C->off[k]), w, 4, 1) <= 0) { hold(0); return -3; }
         }
         n += on;
     }
     hold(0);
-    if (!on) { sc(SYS_MUNMAP, (long)colmap, COL_SIZE, 0, 0, 0); colmap = 0; }
+    if (!on) { sc(SYS_MUNMAP, (long)C->map, C->size, 0, 0, 0); C->map = 0; }
     return n;
 }
+static int colours(int on) {
+    int n = 0, bad = 0;
+    for (unsigned c = 0; c < sizeof cts / sizeof cts[0]; c++) { int r = colours1(&cts[c], on); if (r < 0) bad = r; else n += r; }
+    return n ? n : bad;
+}
+static void picsreset(void) { for (int k = 0; k < NPP; k++) { pps[k].map = 0; pps[k].on = 0; } picflush = 0; for (unsigned c = 0; c < sizeof cts / sizeof cts[0]; c++) cts[c].map = 0; }

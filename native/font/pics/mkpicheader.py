@@ -33,7 +33,8 @@ for k in range(0, len(args), 2):
             arr(lo + '_old', 'u32', [x[2] for x in P], 8), arr(lo + '_nlen', 'u32', [x[3] for x in P], 12),
             arr(lo + '_new', 'u32', [x[4] for x in P], 8), arr(lo + '_raw', 'u32', [x[5] for x in P], 12),
             arr(lo + '_run', 'u32', run, 12), arr(lo + '_rlen', 'u32', rlen, 12), arr(lo + '_runs', 'u8', list(runs), 32),
-            '#define %s_NRID %d' % (pre, len(ids)), arr(lo + '_rid', 'u32', ids, 8)]
+            '#define %s_NRID %d' % (pre, len(ids)), arr(lo + '_rid', 'u32', ids, 8),
+            arr(lo + '_rix', 'u32', [next(j for j, x in enumerate(P) if x[7] == v) for v in ids], 12)]   # id -> picture
     print(pre, len(P), 'pictures', len(runs), 'bytes')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hue                                   # the accent colour table (HUE degrees; the same one mkpics used)
@@ -53,5 +54,12 @@ out += ['/* the text accent colours: color_cmn.uxc entries, RGBA bytes as u32 (l
         arr('col_off', 'u32', [o for o, a, b in ce] or [0], 8),
         arr('col_old', 'u32', [int.from_bytes(a, 'little') for o, a, b in ce] or [0], 8),
         arr('col_new', 'u32', [int.from_bytes(b, 'little') for o, a, b in ce] or [0], 8)]
+sty = open(os.path.join(uxc.APP, 'style_cmn.uxc'), 'rb').read()
+se = hue.styles(sty)
+out += ['/* the text styles\' colours: style_cmn.uxc entries, the same way */',
+        '#define STY_SIZE %du' % len(sty), '#define STY_HASH 0x%08xu' % fnv32(sty), '#define STY_N %d' % len(se),
+        arr('sty_off', 'u32', [o for o, a, b in se] or [0], 8),
+        arr('sty_old', 'u32', [int.from_bytes(a, 'little') for o, a, b in se] or [0], 8),
+        arr('sty_new', 'u32', [int.from_bytes(b, 'little') for o, a, b in se] or [0], 8)]
 out += ['#define PIC_MAXRAW %du' % maxraw, '#define PIC_MAXCOUNT %d' % max(1, maxcount), '#define PIC_MAXRUNS %du' % maxruns]
 open(sys.argv[1], 'w').write('\n'.join(out) + '\n')

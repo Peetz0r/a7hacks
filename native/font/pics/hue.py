@@ -73,3 +73,18 @@ def colours(raw):
                 out.append((i + 4, bytes([r, g, b, a]), bytes([round(r2 * 255), round(g2 * 255), round(b2 * 255), a])))
         i += 8
     return out
+
+def styles(raw):
+    """the text styles' colours: style_cmn.uxc. A style is a u32 id 2607a0nn, then u32 kind; kind 8 (text with an
+    outline) has its RGBA at +12. The orange ones turned like colours() does -> [(offset, old, new)]"""
+    import struct
+    out = []
+    for i in range(0x10, len(raw) - 16, 4):
+        cid, kind = struct.unpack('<II', raw[i:i + 8])
+        if cid >> 8 != 0x2607a0 or kind != 8: continue
+        r, g, b, a = raw[i + 12:i + 16]
+        h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+        if HUE and s > 0.3 and 15 <= h * 360 < 55:
+            r2, g2, b2 = colorsys.hsv_to_rgb((h + HUE / 360) % 1, s, v)
+            out.append((i + 12, bytes([r, g, b, a]), bytes([round(r2 * 255), round(g2 * 255), round(b2 * 255), a])))
+    return out

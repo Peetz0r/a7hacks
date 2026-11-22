@@ -69,7 +69,7 @@
  * after putting Univers back. The icon font /usr/share/app/Sony_DI_Icons.ttf gets the same treatment: the
  * lettering inside its icons (AWB, MF, ISO ...) is redrawn in Comic Relief Bold, each icon keeping its own bytes
  * (font/icons/); so do the camera's pictures (pics.c), and the orange accent colour turns green (pictures and
- * color_cmn.uxc). --text-only leaves the icons, pictures and colours alone, and so does the patcher for a file
+ * color_cmn.uxc, style_cmn.uxc; textures the UI already holds and keeps using are brought up to date in place). --text-only leaves the icons, pictures and colours alone, and so does the patcher for a file
  * that isn't exactly the one this was made for (status gets "noicons" / "nopics"). Status (on N [cM | nocache]
  * [tK | nolabels] [pP[/T] | nopics] [aA] [noicons] | partial N/M | off [pics] | badfile | error ...; M = cached
  * characters marked; P/T: pictures done of how many, while they are still being done) goes to
@@ -1049,7 +1049,11 @@ static int tcwalk(int pid, int fresh, u32 *txt, u32 *taken) {
                     int o = isold(e, id);
                     if (o >= 0) olds[o] = 1;
                     if (fresh == 1 || o >= 0) {
-                        if ((te[TE_USERS] | te[TE_USERS + 1]) == 0 && te[TE_TAG] == 0x80) {
+                        if ((te[TE_USERS] | te[TE_USERS + 1]) != 0 && picpaint(pid, e, id) == 1) {
+                            /* in use (a view that stays keeps it): its pixels are ours now, where it is */
+                            (*taken)++;
+                            if (o >= 0) dropold(o);
+                        } else if ((te[TE_USERS] | te[TE_USERS + 1]) == 0 && te[TE_TAG] == 0x80) {
                             u32 cur, nv = next;
                             if (vrw(pid, link, (u8 *)&cur, 4, 0) == 1 && cur == e && vrw(pid, link, (u8 *)&nv, 4, 1) == 1) {
                                 (*taken)++;

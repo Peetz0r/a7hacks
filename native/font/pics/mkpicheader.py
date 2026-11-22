@@ -25,7 +25,7 @@ for k in range(0, len(args), 2):
         if r not in seen: seen[r] = len(runs); runs += pack(r)
         run.append(seen[r])
     ids = sorted({x[7] for x in P})
-    maxraw = max([maxraw] + [x[5] & 0x7fffffff for x in P]); maxcount = max(maxcount, len(P))
+    maxraw = max([maxraw] + [x[5] & 0x3fffffff for x in P]); maxcount = max(maxcount, len(P))
     out += ['/* %s: %d pictures, %d bytes of our pixels */' % (pj, len(P), len(runs)),
             '#define %s_SIZE %du' % (pre, js['size']), '#define %s_COUNT %d' % (pre, len(P)),
             arr(lo + '_head', 'u8', list(bytes.fromhex(js['head']))),
@@ -39,7 +39,9 @@ for k in range(0, len(args), 2):
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hue                                   # the accent colour table (HUE degrees; the same one mkpics used)
 out += ['/* the accent colour: Sony\'s orange turned %d degrees; RGB444 -> RGB444, for pictures marked in _raw */' % hue.HUE,
-        arr('pic_hue', 'u16', [int(v) for v in hue.LUT], 16)]
+        arr('pic_hue', 'u16', [int(v) for v in hue.LUT], 16),
+        '/* the warning colour (the empty battery): the warm hues turned to red; for pictures marked in _raw (bit 30) */',
+        arr('pic_red', 'u16', [int(v) for v in hue.REDLUT], 16)]
 # the text accent: entries of color_cmn.uxc (the UI reads it as it needs a colour), only where the file is the
 # one we know (its size and hash, with our entries back as they were)
 import uxc

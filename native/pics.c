@@ -9,7 +9,7 @@
  * and our pixels: only the ones we drew (Comic Relief lettering, and what we cleared around the old one), as
  * runs (u16 skip, u16 count, the pixels; ending with 0, 0), themselves packed with the same LZ77. Pictures
  * in Sony's orange accent are marked (top bit of _raw): their colours go through pic_hue (the accent in another
- * hue, green) first, so only our lettering needs pixels here. To make the new picture we unpack the original from the file, give fully transparent pixels colour 0
+ * hue, green) first (or, with bit 30 too, pic_red: warnings such as the empty battery turn red), so only our lettering needs pixels here. To make the new picture we unpack the original from the file, give fully transparent pixels colour 0
  * (everywhere, so it packs tighter), put our pixels in, and pack it again; it is written only if it comes out
  * exactly as mkpics computed (length and hash), with zeros after it to the end of the area. Like the font, it
  * goes into the camera's in-memory copy of the file (whose pages we lock: only the ones that change, the main
@@ -66,12 +66,13 @@ static int picstate(int k, int i) {
 /* makes picture i of file k ours: 0 done, -1 it didn't come out as expected (nothing written), -2 write error */
 static int picset(int k, int i) {
     const struct pp *P = &pps[k];
-    u32 raw = P->raw[i] & 0x7fffffffu, tint = P->raw[i] >> 31;   /* top bit: takes the accent colour */
+    u32 raw = P->raw[i] & 0x3fffffffu, tint = P->raw[i] >> 31;   /* top bit: takes the accent colour */
+    const u16 *tab = P->raw[i] >> 30 & 1 ? pic_red : pic_hue;     /* the next one: a warning, red instead */
     if (raw > PIC_MAXRAW || lz_decode(P->map + P->off[i], (int)P->len[i], pbuf, (int)raw) != (int)raw) return -1;
     for (u32 j = 0; j + 1 < raw; j += 2) if (!(pbuf[j] & 15)) pbuf[j] = pbuf[j + 1] = 0;   /* clear: colour 0 */
     if (tint)                                  /* Sony's orange in another hue: each pixel's colour by the table */
         for (u32 j = 0; j + 1 < raw; j += 2) {
-            u32 px = pbuf[j] | (u32)pbuf[j + 1] << 8, c = pic_hue[px >> 4];
+            u32 px = pbuf[j] | (u32)pbuf[j + 1] << 8, c = tab[px >> 4];
             pbuf[j] = (u8)((c & 15) << 4 | (px & 15)); pbuf[j + 1] = (u8)(c >> 4);
         }
     u32 rl = P->rlen[i];
@@ -181,7 +182,7 @@ static int picpaint(int pid, u32 entry, u32 id) {
     if ((rd32(hd + 0x28) & 0xffffff) != (id & 0xffffff)) return 0;
     u32 dim = rd32(hd + 0x18), aw = dim & 0xffff, ah = dim >> 16, pa = rd32(hd + 0x24);
     const struct pp *P = &pps[k];
-    u32 raw = P->raw[i] & 0x7fffffffu;
+    u32 raw = P->raw[i] & 0x3fffffffu;
     if (!aw || !ah || (aw & 7) || (ah & 7) || aw * ah * 2 != raw || raw > PIC_MAXRAW) return 0;
     if (pa < RAM_LO || pa - RAM_LO > RAM_SIZE - raw) return 0;
     if (lz_decode(P->map + P->off[i], (int)P->len[i], pbuf, (int)raw) != (int)raw) return -1;   /* ours, now */

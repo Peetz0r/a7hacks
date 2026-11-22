@@ -21,9 +21,25 @@ def _lut():
     return t
 LUT = _lut()
 
-def apply(p):
-    """the picture (uint16 RGBA4444) with the table applied (alpha kept)"""
-    return ((LUT[p >> 4].astype(np.uint32) << 4) | (p & 15)).astype(np.uint16)
+# Pictures that warn (the empty battery): Sony made them orange, next to a red that would have clashed; with the
+# accent green they become red instead: the warm hues pulled down by RED degrees (not below 0: red stays red).
+RED = int(os.environ.get('RED', '30'))
+REDS = {0x205c01b, 0x20e8011}                  # resource ids: the empty battery (image_cmn_43, image_EVF)
+def _redlut():
+    t = np.arange(4096, dtype=np.uint16)
+    if not HUE: return t
+    for c in range(4096):
+        r, g, b = (c >> 8 & 15) / 15, (c >> 4 & 15) / 15, (c & 15) / 15
+        h, s, v = colorsys.rgb_to_hsv(r, g, b)
+        if s == 0 or not (h * 360 < WARM[1]): continue
+        r2, g2, b2 = colorsys.hsv_to_rgb(max(0.0, h - RED / 360), s, v)
+        t[c] = int(round(r2 * 15)) << 8 | int(round(g2 * 15)) << 4 | int(round(b2 * 15))
+    return t
+REDLUT = _redlut()
+
+def apply(p, red=False):
+    """the picture (uint16 RGBA4444) with the table applied (alpha kept); red: the warning table instead"""
+    return (((REDLUT if red else LUT)[p >> 4].astype(np.uint32) << 4) | (p & 15)).astype(np.uint16)
 
 def hsv(p):
     a = p & 15; R = ((p >> 12) & 15).astype(float); G = ((p >> 8) & 15).astype(float); B = ((p >> 4) & 15).astype(float)

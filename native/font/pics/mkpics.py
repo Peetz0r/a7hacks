@@ -62,7 +62,8 @@ if __name__ == '__main__':
             p = r['pic']; L = want.get(r['h_'])
             res = None
             for hu in ([1, 0] if huew[r['h_']] and L else [huew[r['h_']]]):
-                tint = hue.apply if hu else (lambda q: q)
+                red = bool(hu) and r['res'] in hue.REDS          # a warning: red instead of green
+                tint = (lambda q, red=red: hue.apply(q, red)) if hu else (lambda q: q)
                 base = to_raw(tint(clean(p)))
                 for lv in ((8, 6, 4) if L else (0,)):
                     render.LEVELS = lv or 8
@@ -74,15 +75,15 @@ if __name__ == '__main__':
                 if len(res[0]) <= r['len']: break
                 if hu: stats['hue dropped (no room)'] += 1
             enc, raw, lv, slow, base, hu = res
-            done[r['h_']] = (enc, runs(base, raw), lv, len(base), slow, hu)
+            done[r['h_']] = (enc, runs(base, raw), lv, len(base), slow, hu | (2 if hu and red else 0))
             texts[r['h_']] = [l['text'] for l in L] if L else []
         enc, rn, lv, rawlen, slow, hu = done[r['h_']]
         if len(enc) > r['len']: stats['toobig'] += 1; continue
         f = files[r['fn']]; start = r['ro'] + 4 + r['off']
         old = f[start:start + r['len']]
-        # raw: top bit = the camera applies the accent colour table first
-        out[r['fn']].append([start, r['len'], fnv(old), len(enc) | slow << 31, fnv(enc), rawlen | hu << 31, rn.hex(), r['id'], r['res']])
-        stats['ok'] += 1; stats['levels%d' % lv] += 1; stats['slow'] += slow; stats['hue'] += hu
+        # raw: top bit = the camera applies the accent colour table first; the next one: the warning (red) table
+        out[r['fn']].append([start, r['len'], fnv(old), len(enc) | slow << 31, fnv(enc), rawlen | (hu & 1) << 31 | (hu >> 1) << 30, rn.hex(), r['id'], r['res']])
+        stats['ok'] += 1; stats['levels%d' % lv] += 1; stats['slow'] += slow; stats['hue'] += hu & 1; stats['red'] += hu >> 1
         stats['lettering' if r['h_'] in want else 'colour only'] += 1
         if lv == 4: print('4 levels:', r['fn'], hex(r['res']))
     for fn in FILES:

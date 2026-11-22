@@ -4,5 +4,5 @@ build/
 local.properties
 __pycache__/
 *.pyc
-# built from native/ (see native/a7hacks.c)
+# the old place of the helper, now built into app/build/helper by Gradle
 app/src/main/jniLibs/armeabi/liba7hacks.so

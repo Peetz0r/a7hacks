@@ -76,9 +76,11 @@
  * /android/dev/a7hacks.ft. A stop (SIGTERM, the app's Restart) is held off while
  * the patcher writes, so nothing is left half written.
  *
- * Static, no libc: build with
- *   clang --target=arm-linux-gnueabi -march=armv7-a -static -nostdlib -ffreestanding -Os -fuse-ld=lld \
- *         -o ../app/src/main/jniLibs/armeabi/liba7hacks.so a7hacks.c
+ * Static, no libc; the app's Gradle build makes it (task buildHelper, into app/build/helper/armeabi) with
+ *   clang --target=arm-linux-gnueabi -march=armv7-a -mfpu=none -mfloat-abi=soft -static -nostdlib \
+ *         -ffreestanding -Os -fuse-ld=lld -o liba7hacks.so a7hacks.c
+ * (-mfpu=none: no VFP/NEON instructions, which newer clang versions use by default; a helper with them crashed
+ * the camera)
  * (named lib*.so so that Android installs it, executable, with the app's native libraries)
  */
 typedef unsigned int u32;

@@ -24,3 +24,52 @@ android {
         checkReleaseBuilds false
     }
 }
+
+// The root helper, liba7hacks.so: a static ARM binary without libc, built from ../native with clang and lld. It
+// isn't an Android library (Android only installs it next to the app so it can be run), but the NDK's clang builds
+// it just as well, and that one is there for Android Studio also when it runs as a Flatpak: install "NDK (Side by
+// side)" in the SDK Manager. Another clang: set a7hacks.clang in local.properties, or CLANG in the environment.
+// It goes into build/helper/armeabi and from there into the APK like any native library.
+def helperDir = layout.buildDirectory.dir('helper')
+def localClang = {
+    def p = new Properties()
+    def f = rootProject.file('local.properties')
+    if (f.exists()) f.withInputStream { p.load(it) }
+    p.getProperty('a7hacks.clang') ?: System.getenv('CLANG')
+}()
+def ndkClang = {
+    // any installed NDK will do (the newest): android.ndkDirectory would insist on the one this AGP version wants
+    def os = System.getProperty('os.name').toLowerCase()
+    def host = os.contains('win') ? 'windows-x86_64' : os.contains('mac') ? 'darwin-x86_64' : 'linux-x86_64'
+    def rel = "toolchains/llvm/prebuilt/$host/bin/clang" + (os.contains('win') ? '.exe' : '')
+    def sdk = android.sdkDirectory
+    def ndks = (new File(sdk, 'ndk').listFiles() ?: []).findAll { new File(it, rel).exists() }
+    ndks = ndks.sort { a, b -> def x = a.name.tokenize('.'), y = b.name.tokenize('.')
+        for (int i = 0; i < Math.min(x.size(), y.size()); i++) {
+            int c = (x[i].isInteger() && y[i].isInteger()) ? x[i].toInteger() <=> y[i].toInteger() : x[i] <=> y[i]
+            if (c) return c
+        }
+        x.size() <=> y.size() }
+    if (!ndks && new File(sdk, 'ndk-bundle/' + rel).exists()) ndks = [new File(sdk, 'ndk-bundle')]
+    if (!ndks) throw new GradleException("no NDK with clang in $sdk/ndk: install \"NDK (Side by side)\" in the SDK Manager, or set a7hacks.clang in local.properties")
+    new File(ndks.last(), rel).absolutePath
+}
+def buildHelper = tasks.register('buildHelper', Exec) {
+    description = 'Builds the root helper liba7hacks.so from native/'
+    def src = rootProject.file('native')
+    def out = helperDir.get().file('armeabi/liba7hacks.so').asFile
+    inputs.files(fileTree(src) { include '*.c', '*.h' })
+    outputs.file(out)
+    workingDir src
+    // -mfpu=none: no VFP/NEON registers (newer clang, like the NDK's, uses them for armv7-a by default, and a
+    // helper that does crashes the whole camera)
+    args '--target=arm-linux-gnueabi', '-march=armv7-a', '-mfpu=none', '-mfloat-abi=soft', '-static', '-nostdlib',
+        '-ffreestanding', '-Os', '-fuse-ld=lld', '-o', out.absolutePath, 'a7hacks.c'
+    doFirst {
+        out.parentFile.mkdirs()
+        executable = localClang ?: ndkClang()
+        logger.lifecycle("liba7hacks.so with $executable")
+    }
+}
+android.sourceSets.main.jniLibs.srcDirs += helperDir.get().asFile
+tasks.matching { it.name == 'preBuild' }.configureEach { dependsOn buildHelper }

@@ -4,12 +4,12 @@ plugins {
 
 android {
     namespace 'nl.peetz0r.a7hacks'
-    compileSdk 34
+    compileSdk 37
 
     defaultConfig {
         applicationId 'nl.peetz0r.a7hacks'
         minSdk 10
-        targetSdk 10
+        targetSdk 16
         versionCode 1
         versionName '1.0'
     }

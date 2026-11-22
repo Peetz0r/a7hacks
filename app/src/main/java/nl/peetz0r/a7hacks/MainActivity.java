@@ -9,6 +9,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TableLayout;
 import android.widget.TableRow;
@@ -23,6 +24,8 @@ public class MainActivity extends Activity {
     private static final int GAP = 24;                 // between the focal length and the lens name (px)
 
     private TableLayout lensTable;
+    private TextView progressLabel;
+    private ProgressBar progressBar;
     private TextView logView;
     private ScrollView logScroll;
     private int shownLog = -1;
@@ -64,8 +67,21 @@ public class MainActivity extends Activity {
         fp.setMargins(0, 8, 0, 8);
         root.addView(frame, fp);
 
-        LinearLayout bottom = new LinearLayout(this);       // last key at the left, restart at the right
-        bottom.addView(new TextView(this), new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        LinearLayout bottom = new LinearLayout(this);       // patching progress at the left, restart at the right
+        bottom.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout progress = new LinearLayout(this);
+        progress.setOrientation(LinearLayout.VERTICAL);
+        progressLabel = new TextView(this);
+        progressLabel.setTextSize(13);
+        Fonts.comic(progressLabel, false);
+        progress.addView(progressLabel);
+        progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);   // the Holo one
+        progress.addView(progressBar, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        pp.setMargins(0, 0, 24, 0);
+        bottom.addView(progress, pp);
+        showProgress(null);
         Button restart = new Button(this);
         restart.setText("Restart");
         restart.setTextSize(16.5f);
@@ -117,6 +133,7 @@ public class MainActivity extends Activity {
     }
 
     private void refresh() {
+        showProgress(Starter.fontStatus());
         int mm = new SteadyShot(Starter.SAMPLE_FILE, 5000).read();
         fillLenses(StartService.profiles, mm);
         int v = AppLog.version();
@@ -127,6 +144,45 @@ public class MainActivity extends Activity {
                 public void run() { logScroll.fullScroll(View.FOCUS_DOWN); }
             });
         }
+    }
+
+    /** The font patcher's progress, from its status line: the font ("partial N/M"), then the pictures ("pN/T"
+     *  while they're being done); once all is in, a short line; nothing while it isn't running. */
+    private void showProgress(String ft) {
+        int done = -1, total = -1;
+        String what = null;
+        if (ft != null && ft.startsWith("partial ")) {
+            what = "Font";
+            String[] f = ft.substring(8).trim().split("/");
+            if (f.length == 2) { done = num(f[0]); total = num(f[1]); }
+        } else if (ft != null && ft.startsWith("on ")) {
+            for (String w : ft.split(" ")) {
+                int slash = w.indexOf('/');
+                if (w.length() > 1 && w.charAt(0) == 'p' && Character.isDigit(w.charAt(1)) && slash > 0) {
+                    what = "Pictures"; done = num(w.substring(1, slash)); total = num(w.substring(slash + 1));
+                }
+            }
+            if (what == null) {                           // all in
+                progressLabel.setText("Patching done");
+                progressLabel.setVisibility(View.VISIBLE);
+                progressBar.setVisibility(View.GONE);
+                return;
+            }
+        }
+        if (what == null || done < 0 || total <= 0) {
+            progressLabel.setVisibility(View.INVISIBLE);
+            progressBar.setVisibility(View.INVISIBLE);
+            return;
+        }
+        progressLabel.setText(what + "  " + done + " / " + total);
+        progressBar.setMax(total);
+        progressBar.setProgress(Math.min(done, total));
+        progressLabel.setVisibility(View.VISIBLE);
+        progressBar.setVisibility(View.VISIBLE);
+    }
+
+    private static int num(String s) {
+        try { return Integer.parseInt(s.trim()); } catch (NumberFormatException e) { return -1; }
     }
 
     /** Every lens from lenses.ini by focal length; the current one highlighted, an undefined one added in red. */

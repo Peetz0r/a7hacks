@@ -144,6 +144,8 @@ public class StartService extends Service {
         boolean loggedWaitSd = false, loggedStopped = false, exposureStopped = false;
         String exposureKind = null, labelKind = null, fontKind = null;
         boolean fontStopped = false;
+        String picturesLogged = null;          // the "pN" last logged
+        boolean accentLogged = false;
         AppLog.add("started");
         while (true) {
             try {
@@ -158,6 +160,8 @@ public class StartService extends Service {
                     fontStopped = false;
                     fontKind = null;
                     labelKind = null;
+                    picturesLogged = null;
+                    accentLogged = false;
                 }
                 // 1. root sampler (retry: the root channel may not be ready right at boot)
                 if (!setting.isFresh() && SystemClock.elapsedRealtime() - lastSamplerTry > 30000) {
@@ -248,6 +252,21 @@ public class StartService extends Service {
                         }
                     }
                 }
+                // the pictures (and the accent colour) once they're all in: "pN" (while they're still being
+                // done it reads "pN/T", which the screen shows as progress)
+                if (ft != null && ft.startsWith("on ")) {
+                    for (String w : ft.split(" ")) {
+                        if (w.length() > 1 && w.charAt(0) == 'p' && Character.isDigit(w.charAt(1)) && w.indexOf('/') < 0
+                                && !w.equals(picturesLogged)) {
+                            picturesLogged = w;
+                            AppLog.add("pictures: " + w.substring(1) + " of the camera's pictures (focal lengths, page"
+                                + " numbers, AWB, ISO, ...) now have their lettering in Comic Relief and the accent colour in green");
+                        } else if (w.length() > 1 && w.charAt(0) == 'a' && Character.isDigit(w.charAt(1)) && !accentLogged) {
+                            accentLogged = true;
+                            AppLog.add("accent colour: the text the camera draws in orange is now green");
+                        }
+                    }
+                }
                 if (ft != null) {
                     String kind = ft.startsWith("on ") ? "on" : ft.startsWith("partial") ? "partial"
                         : ft.startsWith("off") ? "off" : ft;
@@ -276,12 +295,6 @@ public class StartService extends Service {
                                 else if (w.length() > 1 && w.charAt(0) == 't' && Character.isDigit(w.charAt(1)))
                                     AppLog.add("labels: " + w.substring(1) + " the camera had already drawn get drawn"
                                         + " again in Comic Relief when next shown");
-                                else if (w.length() > 1 && w.charAt(0) == 'p' && Character.isDigit(w.charAt(1)))
-                                    AppLog.add("pictures: " + w.substring(1) + " of the camera's pictures with lettering"
-                                        + " (focal lengths, page numbers, AWB, ISO, ...) now have it in Comic Relief");
-                                else if (w.length() > 1 && w.charAt(0) == 'a' && Character.isDigit(w.charAt(1)))
-                                    AppLog.add("accent colour: the orange of the camera's pictures and of the text it"
-                                        + " draws in colour is now green");
                                 else if (w.equals("nopics"))
                                     AppLog.add("pictures: keeping their own lettering (the camera's picture files"
                                         + " aren't the ones this was made for)");

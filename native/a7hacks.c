@@ -70,8 +70,9 @@
  * (font/icons/); so do the camera's pictures (pics.c), and the orange accent colour turns green (pictures and
  * color_cmn.uxc). --text-only leaves the icons, pictures and colours alone, and so does the patcher for a file
  * that isn't exactly the one this was made for (status gets "noicons" / "nopics"). Status (on N [cM | nocache]
- * [tK | nolabels] [pP | nopics] [aA] [noicons] | partial N/M | off [pics] | badfile | error ...; M = cached
- * characters marked) goes to /android/dev/a7hacks.ft. A stop (SIGTERM, the app's Restart) is held off while
+ * [tK | nolabels] [pP[/T] | nopics] [aA] [noicons] | partial N/M | off [pics] | badfile | error ...; M = cached
+ * characters marked; P/T: pictures done of how many, while they are still being done) goes to
+ * /android/dev/a7hacks.ft. A stop (SIGTERM, the app's Restart) is held off while
  * the patcher writes, so nothing is left half written.
  *
  * Static, no libc: build with
@@ -1287,7 +1288,7 @@ static int font(int on, int icons) {
     picflush = 0;                     /* the label store gives up its copies of our pictures once all are in */
     int pics_state = 0;               /* 2: all our pictures are in */
     sc(SYS_NICE, 19, 0, 0, 0, 0);     /* the camera comes first: unpacking and packing pictures takes a while */
-    char last[40]; last[0] = 0;
+    char last[80]; last[0] = 0;
     int cache = -2;                  /* glyphs marked stale by the last flush; -1: no cache found; -2: none yet */
     int labels = -2;                 /* -1: no label cache found */
     u32 fwin[MAXWIN]; int fwf[MAXWIN], nfwin = -1; u32 fwt = 0;   /* read positions at that flush (-1: no recheck) */
@@ -1329,14 +1330,17 @@ static int font(int on, int icons) {
             else if (t - fwt > 360) nfwin = -1;               /* not within an hour or so: leave it */
         }
         if (nold && labels >= 0) labelflush(0);   /* the out-of-date labels that were in use: once they aren't */
-        char st[40]; int k = 0;
+        char st[80]; int k = 0;
         if (!left) {
             k = scat(st, k, "on "); k = scatn(st, k, (u32)done);
             if (cache == -1) k = scat(st, k, " nocache");
             else if (cache >= 0) { k = scat(st, k, " c"); k = scatn(st, k, (u32)cache); }
             if (labels == -1) k = scat(st, k, " nolabels");
             else if (labels >= 0) { k = scat(st, k, " t"); k = scatn(st, k, tctaken); }
-            if (pics) { k = scat(st, k, " p"); k = scatn(st, k, pdone); }
+            if (pics) {                       /* pictures done (and while some are still to come: of how many) */
+                k = scat(st, k, " p"); k = scatn(st, k, pdone);
+                if (pleft) { k = scat(st, k, "/"); k = scatn(st, k, pdone + (u32)pleft); }
+            }
             if (pics && acc > 0) { k = scat(st, k, " a"); k = scatn(st, k, (u32)acc); }
             else if (icons) k = scat(st, k, " nopics");
             if (noicons && icons) k = scat(st, k, " noicons");

@@ -12,7 +12,7 @@ public final class LensBlock {
     public static final String OFF = "0";
     /** Longest lens name the block takes (65 bytes including the terminating zero). */
     public static final int MAX_NAME = 64;
-    /** Lens name used when a7hacks.ini has no model for the focal length (what the camera writes without a lens). */
+    /** Lens name used when A7HACKS.INI has no model for the focal length (what the camera writes without a lens). */
     public static final String NO_NAME = "----";
 
     private LensBlock() {}
@@ -58,7 +58,7 @@ public final class LensBlock {
     /** One line for the log. */
     public static String describe(int mm, LensProfiles.Profile p) {
         if (p == null || (p.model == null && p.aperture <= 0))
-            return mm + " mm: not in a7hacks.ini, writing the focal length only";
+            return mm + " mm: not in A7HACKS.INI, writing the focal length only";
         return mm + " mm: " + (p.model != null ? p.model : NO_NAME)
             + (p.aperture > 0 ? " (f/" + trim(p.aperture) + ")" : "");
     }

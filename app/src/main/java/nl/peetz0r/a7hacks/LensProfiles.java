@@ -10,7 +10,7 @@ import java.util.Map;
 import java.util.TreeMap;
 
 /**
- * Lens profiles, keyed by the SteadyShot focal length in mm. INI-style text file, a7hacks.ini in the root of the SD card:
+ * Lens profiles, keyed by the SteadyShot focal length in mm. INI-style text file, A7HACKS.INI in the root of the SD card:
  *
  *   # lines starting with # are ignored
  *   [135]

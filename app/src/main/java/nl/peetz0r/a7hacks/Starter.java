@@ -176,9 +176,10 @@ public class Starter {
         return null;
     }
 
-    /** The settings file: a7hacks.ini in the root of the SD card. */
+    /** The settings file: A7HACKS.INI in the root of the SD card. In capitals: the camera's SD card layer (FuFsys)
+     *  only finds names that are 8.3 and upper case; a file saved as a7hacks.ini (lower case) by a PC is invisible to it. */
     static File[] configFiles(File sd) {
-        return new File[] {new File(sd, "a7hacks.ini")};
+        return new File[] {new File(sd, "A7HACKS.INI")};
     }
 
     /**

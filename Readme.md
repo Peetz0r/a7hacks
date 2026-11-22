@@ -25,7 +25,7 @@ Warning: these are silly, but they can be disabled
 * The accent color is now green instead of orange (yes I am considering vinyl wrapping the colored ring around the lens mount too)
 
 ## Configuration
-Create a file `a7hacks.ini` with the following contents on the SD card root:
+Create a file `A7HACKS.INI` (the filename has to be all caps!) with the following contents on the SD card root:
 ```
 [config]
 font = on      # menu font in Comic Relief; off: the camera's own (Univers)
@@ -70,6 +70,8 @@ The regular camera UI is a native Linux app, running outside the android subsyst
 The camera boots quite quickly and that is because it never does a cold boot but it loads an entire memory snapshot from a flash partition. That snapshot was taken 65 seconds after boot, so the camera's uptime will always be higher than that. The system clock is also set to that exact time after the unix epoch. Sony has created their own clock as a kernel driver, which they use for their UI and EXIF data, but isn't hooked up to the linux clock.
 
 They also use a third party filesystem driver ([eSOL PrFILE2](https://www.esol.com/embedded/product/prfile2.html) inside fuse) for the SD card. This lets them use exFAT before Linux had a native exFAT driver. But that also gets the time directly from their clock driver, bypassing the Linux system clock entirely.
+
+There is a glue layer between that driver and the rest of the system which adds some limitations. Filenames cannot be longer than 8.3, and they have to be all caps. It can list existing files with a lowercase filename but it cannot open them. This appears to be a bug, but you would usually not notice, since the camera only has to open files created by itself. If you believed fat32 was case-insensitive
 
 ## Licenses
 * My work in this repository is licensed under the AGPL3, see [`License.md`](License.md)

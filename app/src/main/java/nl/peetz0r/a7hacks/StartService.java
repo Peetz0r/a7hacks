@@ -20,6 +20,7 @@ public class StartService extends Service {
     static volatile long lastExposureTry = 0;
     static volatile long lastLabelTry = 0;
     static volatile long lastFontTry = 0;
+    static volatile long lastClockTry = 0;
     /** From lenses.ini [camera] font: true = Comic Relief, false = the camera's own; null until lenses.ini is read. */
     static volatile Boolean fontWanted = null;
     /** From lenses.ini [camera] icons: false = keep the icons' own lettering. */
@@ -102,6 +103,7 @@ public class StartService extends Service {
         lastExposureTry = 0;
         lastLabelTry = 0;
         lastFontTry = 0;
+        lastClockTry = 0;
         restartRequested = true;
         synchronized (StartService.class) { lastStart = 0; }
     }
@@ -146,6 +148,8 @@ public class StartService extends Service {
         boolean fontStopped = false;
         String picturesLogged = null;          // the "pN" last logged
         boolean accentLogged = false;
+        String clockSeen = null;
+        final String clockOld = Starter.clockStatus();   // an answer from before (a restart): not news
         AppLog.add("started");
         while (true) {
             try {
@@ -162,6 +166,32 @@ public class StartService extends Service {
                     labelKind = null;
                     picturesLogged = null;
                     accentLogged = false;
+                }
+                // 0. the clock: Linux's clock from the camera's own, now and then every minute (it stands still
+                //    while the camera sleeps); the answer comes a moment later
+                if (SystemClock.elapsedRealtime() - lastClockTry > 60000) {
+                    lastClockTry = SystemClock.elapsedRealtime();
+                    try {
+                        Starter.setClock(tool.path());
+                    } catch (Throwable t) {
+                        jlog(ctx, "clock start failed: " + t);
+                    }
+                }
+                String ck = Starter.clockStatus();
+                if (ck != null && !ck.equals(clockSeen)) {
+                    clockSeen = ck;
+                    String[] w = ck.split(" ");
+                    String zone = null;
+                    for (String x : w)
+                        if (x.length() > 1 && (x.charAt(0) == '+' || x.charAt(0) == '-')) {
+                            try { zone = AppLog.setZone(Integer.parseInt(x.substring(x.charAt(0) == '+' ? 1 : 0))); }
+                            catch (NumberFormatException e) { /* not the offset */ }
+                        }
+                    if (ck.equals(clockOld)) { /* only the zone */ }
+                    else if (ck.startsWith("clock set") && w.length >= 4)
+                        AppLog.add("clock set from the camera: " + w[2] + " " + w[3] + (zone != null ? " " + zone : ""));
+                    else if (!ck.startsWith("clock same"))
+                        AppLog.add("clock: " + ck);
                 }
                 // 1. root sampler (retry: the root channel may not be ready right at boot)
                 if (!setting.isFresh() && SystemClock.elapsedRealtime() - lastSamplerTry > 30000) {

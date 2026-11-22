@@ -132,6 +132,25 @@ public class Starter {
         return readLine(FONT_STATUS);
     }
 
+    /**
+     * The clock: "liba7hacks.so --set-clock" sets Linux's clock (which the boot snapshot leaves at 1970) from the
+     * camera's own date and time (its udate driver), RAM only. It runs once and answers in /dev/a7hacks.ck:
+     * "clock set Y-M-D h:m:s +OFF (alarm|tod)" | "clock same +OFF" | "clock unset" | "clock error ...",
+     * OFF being the camera's time zone plus summer time, in minutes east of UTC.
+     */
+    static final File CLOCK_STATUS = new File("/dev/a7hacks.ck");
+
+    static void setClock(String tool) throws NativeException {
+        String cmd = "cd /android/dev;" + tool + " --set-clock >/dev/null 2>&1 &";
+        if (cmd.length() > MAX_COMMAND) throw new NativeException("command too long");
+        Shell.exec(cmd);
+    }
+
+    /** The clock's last answer, or null. */
+    static String clockStatus() {
+        return readLine(CLOCK_STATUS);
+    }
+
     private static String readLine(File file) {
         try {
             FileInputStream in = new FileInputStream(file);

@@ -13,6 +13,7 @@
  *   liba7hacks.so --font-patcher [--text-only]    run forever: UI font, icon and picture lettering, accent colour
  *                                                 (--text-only: the UI font only)
  *   liba7hacks.so --font-restore                  UI font: put the camera's own back
+ *   liba7hacks.so --set-clock                     Linux's clock: set it from the camera's own (see below)
  *   liba7hacks.so --memory-dump path [--all]      copy the UI's own data to path (for study elsewhere;
  *                                                 --all: and the driver memory it has mapped, RAM pages only)
  *   liba7hacks.so --glyph-cache [--mark-stale | --list] [--all]
@@ -109,6 +110,9 @@ static long sc6(long n, long a, long b, long c, long d, long e, long f) {
 #define PICDIR "/usr/share/app/"
 #define DROPCACHES "/proc/sys/vm/drop_caches"
 #define SSFILE "/android/dev/a7hacks.ss"
+#define CKSTATUS "/android/dev/a7hacks.ck"
+#define UDATE "/proc/udm/udate"
+#define ALARMDEV "/dev/alarm"
 #define RAM_LO 0x80000000u     /* physical RAM: 1 GB from 0x80000000 */
 #define RAM_SIZE 0x40000000u
 #else
@@ -129,6 +133,9 @@ long sc6(long n, long a, long b, long c, long d, long e, long f);
 #endif
 #define DROPCACHES "drop_caches"
 #define SSFILE "a7hacks.ss"
+#define CKSTATUS "a7hacks.ck"
+#define UDATE "udate"
+#define ALARMDEV "alarm"
 #define RAM_LO 0u
 #define RAM_SIZE 0xfffff000u
 #endif
@@ -148,6 +155,9 @@ long sc6(long n, long a, long b, long c, long d, long e, long f);
 #define SYS_MMAP2 192
 #define SYS_NICE 34
 #define SYS_RT_SIGPROCMASK 175
+#define SYS_IOCTL 54
+#define SYS_GETTIMEOFDAY 78
+#define SYS_SETTIMEOFDAY 79
 
 /* the answer line, collected here and written out at the end */
 static char msg[2048];
@@ -1358,6 +1368,108 @@ static int font(int on, int icons) {
     }
 }
 
+/* ---- the clock (--set-clock) ----
+ * The camera keeps its date and time in its own driver (udate.ko: UTC, plus the time zone and summer time
+ * offsets from the menu, counted on from a hardware timer), not in Linux's clock, which the boot snapshot
+ * brings back at the second it was taken (65.5 s after 1970 began). The driver shows the local time in
+ * /proc/udm/udate:
+ *   ---------- Clock ----------
+ *    [TIME]
+ *     2026/11/22 14:5:3 [LOCAL TIME]
+ *    [AREA]
+ *     <TD>60 <DST>0 [VALID]
+ * (TD, DST in minutes; local = UTC + TD + DST). Linux's clock is set to that UTC, through Android's alarm
+ * driver (ANDROID_ALARM_SET_RTC: the way Android itself sets it, so its alarms keep up; there is no RTC chip
+ * behind it here, so only RAM changes), or with settimeofday if that fails. To get it within a few tenths of a
+ * second it waits for the driver's second to tick over. Answer (also in /android/dev/a7hacks.ck):
+ *   clock set Y-M-D h:m:s +OFF (alarm | tod) | clock same +OFF | clock unset | clock error ...
+ * (OFF: minutes east of UTC; the time shown is local). Left alone when it is already within 2 s. */
+static int unum(const char **p, int *v) {
+    const char *q = *p; int neg = 0, n = 0, d = 0;
+    while (*q == ' ' || *q == '\n' || *q == '\r' || *q == '\t') q++;
+    if (*q == '-') { neg = 1; q++; }
+    while (*q >= '0' && *q <= '9' && d < 9) { n = n * 10 + (*q++ - '0'); d++; }
+    if (!d) return 0;
+    *v = neg ? -n : n; *p = q; return 1;
+}
+static const char *after(const char *s, const char *w) {
+    for (; *s; s++) { int i = 0; while (w[i] && s[i] == w[i]) i++; if (!w[i]) return s + i; }
+    return 0;
+}
+/* days since 1970-01-01 (years 1970..2099: every 4th a leap year) */
+static long days70(int y, int m, int d) {
+    static const short cum[12] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
+    long n = (long)(y - 1970) * 365 + (y - 1969) / 4 + cum[m - 1] + d - 1;
+    if (m > 2 && (y & 3) == 0) n++;
+    return n;
+}
+/* the driver's local time as seconds since 1970 (local), and its offset in minutes:
+ * 1 ok, 0 unset / no data, -1 can't read */
+static int udread(long *t, int *off) {
+    char b[512];
+    int f = sc(SYS_OPEN, (long)UDATE, 0, 0, 0, 0);
+    if (f < 0) return -1;
+    int n = sc(SYS_READ, f, (long)b, sizeof b - 1, 0, 0);
+    sc(SYS_CLOSE, f, 0, 0, 0, 0);
+    if (n <= 0) return -1;
+    b[n] = 0;
+    const char *p = after(b, "[TIME]");
+    int Y, M, D, h, mi, se, td = 0, dst = 0;
+    if (!p || !unum(&p, &Y) || *p++ != '/' || !unum(&p, &M) || *p++ != '/' || !unum(&p, &D)
+        || !unum(&p, &h) || *p++ != ':' || !unum(&p, &mi) || *p++ != ':' || !unum(&p, &se)) return -1;
+    while (*p == ' ') p++;
+    int local = after(p, "[LOCAL TIME]") == p + 12, utc = after(p, "[UTC]") == p + 5;
+    if (!local && !utc) return 0;                       /* UNSET TIME / NO DATA */
+    if (local) {
+        const char *a = after(p, "<TD>"); if (!a || !unum(&a, &td)) return -1;
+        a = after(p, "<DST>"); if (!a || !unum(&a, &dst)) return -1;
+    }
+    if (Y < 2014 || Y > 2099 || M < 1 || M > 12 || D < 1 || D > 31 || h > 23 || mi > 59 || se > 60) return -1;
+    if (td < -24 * 60 || td > 24 * 60 || dst < 0 || dst > 120) return -1;
+    *t = days70(Y, M, D) * 86400 + h * 3600 + mi * 60 + se;
+    *off = td + dst;
+    return 1;
+}
+static void outoff(int off) {
+    out(off < 0 ? " -" : " +"); outn((u32)(off < 0 ? -off : off));
+}
+static void out2(int v) { char b[3] = {(char)('0' + v / 10), (char)('0' + v % 10), 0}; out(b); }
+static int setclock(void) {
+    long t, t1; int off, off1;
+    int r = udread(&t, &off);
+    if (r < 0) { out("clock error read " UDATE); return 2; }
+    if (!r) { out("clock unset"); return 1; }
+    long tv[2], tz[2];
+    if (sc(SYS_GETTIMEOFDAY, (long)tv, (long)tz, 0, 0, 0) < 0) tv[0] = 0;
+    long d = tv[0] + off * 60L - t;
+    if (d >= -2 && d <= 2) { out("clock same"); outoff(off); return 0; }
+    /* wait for the driver's second to tick over (at most ~1.2 s), so that we know it to ~20 ms */
+    long ts[2] = {0, 20000000};
+    for (int i = 0; i < 60; i++) {
+        sc(SYS_NANOSLEEP, (long)ts, 0, 0, 0, 0);
+        if (udread(&t1, &off1) != 1) { out("clock error read " UDATE); return 2; }
+        if (t1 != t) { t = t1; off = off1; break; }
+    }
+    long utc = t - off * 60L;
+    long now[2] = {utc, 10000000};                       /* timespec: half a poll into the new second */
+    const char *how = " (alarm)";
+    int a = sc(SYS_OPEN, (long)ALARMDEV, 2, 0, 0, 0);    /* O_RDWR */
+    long e = a < 0 ? -1 : sc(SYS_IOCTL, a, 0x40086105, (long)now, 0, 0);   /* ANDROID_ALARM_SET_RTC */
+    if (a >= 0) sc(SYS_CLOSE, a, 0, 0, 0, 0);
+    if (e < 0) {
+        long tod[2] = {utc, 10000};                      /* timeval */
+        how = " (tod)";
+        if (sc(SYS_SETTIMEOFDAY, (long)tod, 0, 0, 0, 0) < 0) { out("clock error set"); return 2; }
+    }
+    long day = t / 86400, sec = t % 86400;
+    int Y = 1970; while (days70(Y + 1, 1, 1) <= day) Y++;
+    int M = 1; while (M < 12 && days70(Y, M + 1, 1) <= day) M++;
+    out("clock set "); outn(Y); out("-"); out2(M); out("-"); out2((int)(day - days70(Y, M, 1) + 1));
+    out(" "); out2((int)(sec / 3600)); out(":"); out2((int)(sec / 60 % 60)); out(":"); out2((int)(sec % 60));
+    outoff(off); out(how);
+    return 0;
+}
+
 static int eq(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *a == *b; }
 static int run(int argc, char **argv) {
     const char *o = argc >= 2 ? argv[1] : "";
@@ -1366,6 +1478,7 @@ static int run(int argc, char **argv) {
     if (argc == 2 && eq(o, "--label-patcher")) return label();
     if (eq(o, "--font-patcher") && (argc == 2 || (argc == 3 && eq(o2, "--text-only")))) return font(1, argc == 2);
     if (argc == 2 && eq(o, "--font-restore")) return font(0, 1);
+    if (argc == 2 && eq(o, "--set-clock")) return setclock();
     if (eq(o, "--memory-dump") && (argc == 3 || (argc == 4 && eq(argv[3], "--all")))) return memdump(argv[2], argc == 4);
     if (eq(o, "--glyph-cache")) {
         int mode = 0;
@@ -1435,6 +1548,7 @@ static int run(int argc, char **argv) {
 static int finish(int argc, char **argv, int code) {
     msg[mlen++] = '\n';
     sc(SYS_WRITE, 1, (long)msg, mlen, 0, 0);
+    if (argc == 2 && eq(argv[1], "--set-clock")) { msg[mlen - 1] = 0; statusto(CKSTATUS, CKSTATUS ".t", msg); msg[mlen - 1] = '\n'; }
     if (argc >= 3 && (eq(argv[1], "--lens-write") || eq(argv[1], "--lens-read"))) {
         int f = sc(SYS_OPEN, (long)STATUS ".t", 01 | 0100 | 01000, 0644, 0, 0);   /* O_WRONLY|O_CREAT|O_TRUNC */
         if (f >= 0) {

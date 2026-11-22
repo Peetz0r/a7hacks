@@ -29,6 +29,8 @@ public class MainActivity extends Activity {
     private TextView logView;
     private ScrollView logScroll;
     private int shownLog = -1;
+    private int shownMm = Integer.MIN_VALUE;
+    private TreeMap<Integer, LensProfiles.Profile> shownProfiles;
     private final Handler handler = new Handler();
     private boolean resumed = false;
 
@@ -36,7 +38,7 @@ public class MainActivity extends Activity {
         public void run() {
             if (!resumed) return;
             refresh();
-            handler.postDelayed(this, 2000);
+            handler.postDelayed(this, 500);
         }
     };
 
@@ -112,7 +114,7 @@ public class MainActivity extends Activity {
         super.onResume();
         resumed = true;
         refresh();
-        handler.postDelayed(refresher, 2000);
+        handler.postDelayed(refresher, 500);
     }
 
     @Override
@@ -135,7 +137,11 @@ public class MainActivity extends Activity {
     private void refresh() {
         showProgress(Starter.fontStatus());
         int mm = new SteadyShot(Starter.SAMPLE_FILE, 5000).read();
-        fillLenses(StartService.profiles, mm);
+        TreeMap<Integer, LensProfiles.Profile> pr = StartService.profiles;
+        if (mm != shownMm || pr != shownProfiles) {     // the list only when it changes (no flicker at 2 Hz)
+            shownMm = mm; shownProfiles = pr;
+            fillLenses(pr, mm);
+        }
         int v = AppLog.version();
         if (v != shownLog) {                        // new output (or first load): show it and scroll to the end
             shownLog = v;

@@ -5,6 +5,12 @@ the new data's length and hash, its size unpacked, and our pixels (runs: u16 ski
 ending with 0, 0; packed with the same LZ77 as the pictures, and shared between pictures that are the same).
 No pixels of Sony's are in here: only the ones we drew. Needs uxclz (cc -O2 -DUXCLZ_MAIN -x c ../../uxclz.c)."""
 import json, sys, subprocess, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import uxc
+def fnv32(b):
+    h = 0x811c9dc5
+    for c in b: h = ((h ^ c) * 0x01000193) & 0xffffffff
+    return h
 UXCLZ = os.environ.get('UXCLZ', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uxclz'))
 def pack(b): return subprocess.run([UXCLZ, 'e'], input=b, capture_output=True, check=True).stdout
 def arr(name, typ, vals, per=16):
@@ -25,6 +31,11 @@ for k in range(0, len(args), 2):
         if r not in seen: seen[r] = len(runs); runs += pack(r)
         run.append(seen[r])
     ids = sorted({x[7] for x in P})
+    # each picture as Sony unpacked it: a hash, so that a copy the UI still holds is overwritten only when it is
+    # exactly that (font/pics/lz.py unpacks, from the camera's own file)
+    from lz import decode
+    orig = open(os.path.join(uxc.APP, os.path.basename(pj)[:-len('.pics.json')]), 'rb').read()
+    ohash = [fnv32(decode(orig[x[0]:x[0] + x[1]], x[5] & 0x3fffffff)) for x in P]
     maxraw = max([maxraw] + [x[5] & 0x3fffffff for x in P]); maxcount = max(maxcount, len(P))
     out += ['/* %s: %d pictures, %d bytes of our pixels */' % (pj, len(P), len(runs)),
             '#define %s_SIZE %du' % (pre, js['size']), '#define %s_COUNT %d' % (pre, len(P)),
@@ -32,6 +43,7 @@ for k in range(0, len(args), 2):
             arr(lo + '_off', 'u32', [x[0] for x in P], 12), arr(lo + '_len', 'u32', [x[1] for x in P], 12),
             arr(lo + '_old', 'u32', [x[2] for x in P], 8), arr(lo + '_nlen', 'u32', [x[3] for x in P], 12),
             arr(lo + '_new', 'u32', [x[4] for x in P], 8), arr(lo + '_raw', 'u32', [x[5] for x in P], 12),
+            arr(lo + '_ohash', 'u32', ohash, 8),
             arr(lo + '_run', 'u32', run, 12), arr(lo + '_rlen', 'u32', rlen, 12), arr(lo + '_runs', 'u8', list(runs), 32),
             '#define %s_NRID %d' % (pre, len(ids)), arr(lo + '_rid', 'u32', ids, 8),
             arr(lo + '_rix', 'u32', [next(j for j, x in enumerate(P) if x[7] == v) for v in ids], 12)]   # id -> picture
@@ -44,13 +56,8 @@ out += ['/* the accent colour: Sony\'s orange turned %d degrees; RGB444 -> RGB44
         arr('pic_red', 'u16', [int(v) for v in hue.REDLUT], 16)]
 # the text accent: entries of color_cmn.uxc (the UI reads it as it needs a colour), only where the file is the
 # one we know (its size and hash, with our entries back as they were)
-import uxc
 col = open(os.path.join(uxc.APP, 'color_cmn.uxc'), 'rb').read()
 ce = hue.colours(col)
-def fnv32(b):
-    h = 0x811c9dc5
-    for c in b: h = ((h ^ c) * 0x01000193) & 0xffffffff
-    return h
 out += ['/* the text accent colours: color_cmn.uxc entries, RGBA bytes as u32 (little endian) */',
         '#define COL_SIZE %du' % len(col), '#define COL_HASH 0x%08xu' % fnv32(col), '#define COL_N %d' % len(ce),
         arr('col_off', 'u32', [o for o, a, b in ce] or [0], 8),

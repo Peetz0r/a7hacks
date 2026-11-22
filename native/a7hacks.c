@@ -71,7 +71,7 @@
  * (font/icons/); so do the camera's pictures (pics.c), and the orange accent colour turns green (pictures and
  * color_cmn.uxc, style_cmn.uxc). --text-only leaves the icons, pictures and colours alone, and so does the patcher for a file
  * that isn't exactly the one this was made for (status gets "noicons" / "nopics"). Status (on N [cM | nocache]
- * [tK | nolabels] [pP[/T] | nopics] [aA] [noicons] | partial N/M | off [pics] | badfile | error ...; M = cached
+ * [tK | nolabels] [pP[/T] | nopics] [aA] [noicons] | partial N/M [pP/T] | off [pics] | badfile | error ...; M = cached
  * characters marked; P/T: pictures done of how many, while they are still being done) goes to
  * /android/dev/a7hacks.ft. A stop (SIGTERM, the app's Restart) is held off while
  * the patcher writes, so nothing is left half written.
@@ -418,6 +418,9 @@ static void delhit(int i) { for (; i + 1 < nhits; i++) { hpid[i] = hpid[i + 1]; 
 static u32 rs[MAXRNG], rend[MAXRNG];
 static int nrng, isui;
 static int heaponly, heapk;     /* heaponly: take only the process's own data (see the font cache); heapk: its [heap] */
+#define MAXSTREAM 64
+static u32 stpa[MAXSTREAM], stlen[MAXSTREAM];   /* wantstream: the process's /dev/stream mappings (physical, length) */
+static int nst, wantstream;
 static const char *hexp(const char *p, const char *end, u32 *v) {
     u32 x = 0; int n = 0;
     while (p < end && hexv(*p) >= 0) { if (++n > 8) return 0; x = x << 4 | (u32)hexv(*p); p++; }
@@ -434,9 +437,12 @@ static void maps_line(const char *p, const char *end) {
     if (!(p = hexp(p, end, &e)) || p >= end || *p++ != ' ') return;
     if (end - p < 5 || p[4] != ' ') return;
     char r = p[0], w = p[1]; p += 4;
+    u32 pgo = 0;
+    { const char *q = p; while (q < end && *q == ' ') q++; if (!hexp(q, end, &pgo)) pgo = 0; }
     for (int f = 0; f < 3; f++) { while (p < end && *p == ' ') p++; while (p < end && *p != ' ') p++; }
     while (p < end && *p == ' ') p++;
     int n = (int)(end - p);
+    if (wantstream && n == 11 && starts(p, n, "/dev/stream") && nst < MAXSTREAM) { stpa[nst] = pgo; stlen[nst] = e - s; nst++; }
     if (n >= 10 && starts(end - 10, 10, "/libObj.so")) isui = 1;
     if (r != 'r' || e <= s) return;
     if (heaponly == 2 && n && starts(p, n, "/dev/")) {     /* M a: driver memory too (only pages in RAM get read) */
@@ -740,7 +746,8 @@ static int fset1(int f, int i) {
     return frange(f, i) == 1 ? 0 : -1;
 }
 
-#define PIC_BATCH 100                   /* pictures per pass of the font patcher's loop (a pass a second while there are more) */
+#define PIC_BATCH 25                    /* pictures per pass of the font patcher's loop (four passes a second while there are more) */
+#define PIC_STEP 25                     /* the status shows the pictures done every so many */
 #include "pics.c"
 
 /* The UI reads the fonts through buffered file reads (1 KB at a time, at 1 KB boundaries). A character that
@@ -1051,6 +1058,9 @@ static int tcwalk(int pid, int fresh, u32 *txt, u32 *taken) {
                     int o = isold(e, id);
                     if (o >= 0) olds[o] = 1;
                     if (fresh == 1 || o >= 0) {
+                        /* in use (a view that stays keeps it): our pixels where it is, if it is Sony's picture;
+                         * and it still goes, as below, once nothing uses it */
+                        if (te[TE_USERS] | te[TE_USERS + 1]) picpaint(pid, e, id);
                         if ((te[TE_USERS] | te[TE_USERS + 1]) == 0 && te[TE_TAG] == 0x80) {
                             u32 cur, nv = next;
                             if (vrw(pid, link, (u8 *)&cur, 4, 0) == 1 && cur == e && vrw(pid, link, (u8 *)&nv, 4, 1) == 1) {
@@ -1262,6 +1272,106 @@ static int fontoff(void) {
 /* --font-patcher: put the new outlines in place and keep them there (runs forever); icons: the icon lettering and the
  * pictures with lettering in them too (pics.c); --font-restore: put the camera's own fonts back (the pictures stay
  * until the next start: the UI keeps their files mapped) */
+/* the font patcher's status line (see the top of this file), written when it changed; st: the line */
+/* ---- the pictures the camera unpacked before ours came in ----
+ * Views made at the factory, before the boot snapshot (the menus' highlight bars, the selected tab, ...), keep
+ * the pictures they unpacked then, outside the label store, for as long as the camera runs: never read from the
+ * file again. Each such texture has a header in the UI's own memory: ..., width | height << 16 (in whole tiles),
+ * 1, 0, its physical address, its resource id 0x02xxxxxx. The texture lies in the graphics memory the UI maps
+ * from /dev/stream, unpacked exactly as in the file (the GPU's tiled RGBA4444). So: walk the UI's own data for
+ * such headers, and for a picture of ours (in the file already), with exactly its size, lying wholly inside
+ * one of the UI's /dev/stream mappings and holding exactly Sony's picture, write our pixels into it through
+ * /dev/stream (mapped the way the UI maps it, so the GPU sees the writes). (The label store's own copies are
+ * done in tcwalk, picpaint.) Returns how many textures changed, or <0 (can't). */
+static int texd;
+#define MAXTEX 1024
+static u32 txpa[MAXTEX]; static int ntx;
+static u8 tpg[4096];
+static int texpaint(int sfd, u32 res, u32 tpa, u32 dim) {
+    int ki = picfind(0x1a000000u | (res & 0xffffff));
+    if (ki < 0) return 0;
+    int k = ki >> 16, i = ki & 0xffff;
+    const struct pp *P = &pps[k];
+    if (pbad[k][i] || picstate(k, i) != 1) return 0;
+    u32 raw = P->raw[i] & 0x3fffffffu, tw = dim & 0xffff, th = dim >> 16;
+    if (!tw || !th || (tw & 7) || (th & 7) || tw * th * 2 != raw || raw > PIC_MAXRAW || (tpa & 3)) return 0;
+    int in = 0;
+    for (int s_ = 0; s_ < nst; s_++) if (tpa >= stpa[s_] && stlen[s_] >= raw && tpa - stpa[s_] <= stlen[s_] - raw) in = 1;
+    if (!in) return 0;
+    for (int j = 0; j < ntx; j++) if (txpa[j] == tpa) return 0;       /* seen already (a header seen twice) */
+    if (ntx < MAXTEX) txpa[ntx++] = tpa;
+    if (lz_decode(P->map + P->off[i], (int)P->len[i], pbuf, (int)raw) != (int)raw) return -1;
+    u32 base = tpa & ~0xfffu, ml = ((tpa & 0xfff) + raw + 0xfff) & ~0xfffu;
+    long a = sc6(SYS_MMAP2, 0, ml, 3 /* PROT_READ | PROT_WRITE */, 1 /* MAP_SHARED */, sfd, base >> 12);
+    if ((unsigned long)a >= (unsigned long)-4095L) return -1;
+    volatile u8 *t = (volatile u8 *)a + (tpa & 0xfff);
+    /* only over Sony's picture exactly (its hash, picpatch.h _ohash): a header we misread never costs another texture */
+    u32 hsh = 0x811c9dc5u, same = 1;
+    for (u32 j = 0; j < raw; j++) { u8 c = t[j]; hsh = (hsh ^ c) * 0x01000193u; if (c != pbuf[j]) same = 0; }
+    int changed = 0;
+    if (!same && hsh == P->ohash[i]) {
+        hold(1);
+        for (u32 j = 0; j < raw; j++) t[j] = pbuf[j];
+        hold(0);
+        changed = 1;
+    }
+    sc(SYS_MUNMAP, a, ml, 0, 0, 0);
+    return changed;
+}
+static int texpass(void) {
+#ifdef HOST
+    return 0;
+#else
+    findprocs(0);
+    if (!np_) return -1;
+    int pid = plist[0];
+    nst = 0; wantstream = 1; heaponly = 1; int r = readmaps(pid); heaponly = 0; wantstream = 0;
+    if (r < 0 || !nst) return -1;
+    int f = pm_open(pid); if (f < 0) return -1;
+    int sfd = sc(SYS_OPEN, (long)"/dev/stream", 2 | 0x101000 /* O_RDWR | O_SYNC */, 0, 0, 0);
+    if (sfd < 0) return -3;
+    int changed = 0; ntx = 0;
+    for (int k = 0; k < nrng; k++)
+        for (u32 va = rs[k]; va < rend[k]; va += 4096) {
+            u8 e[8]; unsigned long long res; u32 pa;
+            if (sc(SYS_LLSEEK, f, 0, (long)((va >> 12) * 8), (long)&res, 0) < 0 || sc(SYS_READ, f, (long)e, 8, 0, 0) != 8) continue;
+            if (!(pa = pm_phys(e, va)) || pread_(pa, tpg, 4096) < 0) continue;
+            for (int j = 16; j + 4 <= 4096; j += 4) {
+                u32 id = rd32(tpg + j);
+                if (id >> 24 != 2 || rd32(tpg + j - 12) != 1 || rd32(tpg + j - 8) != 0) continue;
+                if (texpaint(sfd, id, rd32(tpg + j - 4), rd32(tpg + j - 16)) > 0) changed++;
+            }
+        }
+    sc(SYS_CLOSE, sfd, 0, 0, 0, 0);
+    return changed;
+#endif
+}
+
+static void ftreport(char *st, char *last, int left, int done, int total, int cache, int labels, int pics,
+                     u32 pdone, int pleft, int acc, int icons, int noicons) {
+    int k = 0;
+    if (!left) {
+        k = scat(st, k, "on "); k = scatn(st, k, (u32)done);
+        if (cache == -1) k = scat(st, k, " nocache");
+        else if (cache >= 0) { k = scat(st, k, " c"); k = scatn(st, k, (u32)cache); }
+        if (labels == -1) k = scat(st, k, " nolabels");
+        else if (labels >= 0) { k = scat(st, k, " t"); k = scatn(st, k, tctaken); }
+    } else { k = scat(st, k, "partial "); k = scatn(st, k, (u32)done); k = scat(st, k, "/"); k = scatn(st, k, (u32)total); }
+    if (pics && (!left || pleft)) {   /* pictures done (and while some are still to come: of how many) */
+        k = scat(st, k, " p"); k = scatn(st, k, pdone);
+        if (pleft) { k = scat(st, k, "/"); k = scatn(st, k, pdone + (u32)pleft); }
+    }
+    if (!left) {
+        if (pics && acc > 0) { k = scat(st, k, " a"); k = scatn(st, k, (u32)acc); }
+        else if (icons) k = scat(st, k, " nopics");
+        if (pics && texd >= 0) { k = scat(st, k, " g"); k = scatn(st, k, (u32)texd); }
+        if (noicons && icons) k = scat(st, k, " noicons");
+    }
+    int changed = 0;
+    for (int i = 0; ; i++) { if (st[i] != last[i]) { changed = 1; break; } if (!st[i]) break; }
+    if (changed) { ftstatus(st); for (int i = 0; i <= k; i++) last[i] = st[i]; }
+}
+
 static int font(int on, int icons) {
     if (!on) {
         ftstatus("restoring");
@@ -1299,6 +1409,7 @@ static int font(int on, int icons) {
     for (int f = 0; f < NPF; f++) if (act[f]) total += pfs[f].count;
     picflush = 0;                     /* the label store gives up its copies of our pictures once all are in */
     int pics_state = 0;               /* 2: all our pictures are in */
+    texd = -2; u32 texd2 = 0;         /* textures brought up to date (-2: not looked yet, -1/-3: can't), next look */
     sc(SYS_NICE, 19, 0, 0, 0, 0);     /* the camera comes first: unpacking and packing pictures takes a while */
     char last[80]; last[0] = 0;
     int cache = -2;                  /* glyphs marked stale by the last flush; -1: no cache found; -2: none yet */
@@ -1320,7 +1431,12 @@ static int font(int on, int icons) {
         int acc = pics ? colours(1) : 0;      /* the text accent colour too */
         int pleft = 0;
         if (pics && pics_state != 2) {         /* a batch at a time; once all are in, the label store's copies go */
-            pdone = picsdo(PIC_BATCH, &pleft);
+            for (int c = 0; c < PIC_BATCH; c += PIC_STEP) {     /* the progress shown every PIC_STEP pictures */
+                pdone = picsdo(PIC_STEP, &pleft);
+                if (!pleft) break;
+                char st[80];
+                ftreport(st, last, left, done, total, cache, labels, pics, pdone, pleft, acc, icons, noicons);
+            }
             if (!pleft) { pics_state = 2; picflush = 1; if (!wrote) { int l = labelflush(1); if (l >= 0) labels = l; } }
         } else if (pics) { int z; pdone = picsdo(0, &z); }
         if (wrote) {
@@ -1342,30 +1458,18 @@ static int font(int on, int icons) {
             else if (t - fwt > 360) nfwin = -1;               /* not within an hour or so: leave it */
         }
         if (nold && labels >= 0) labelflush(0);   /* the out-of-date labels that were in use: once they aren't */
-        char st[80]; int k = 0;
-        if (!left) {
-            k = scat(st, k, "on "); k = scatn(st, k, (u32)done);
-            if (cache == -1) k = scat(st, k, " nocache");
-            else if (cache >= 0) { k = scat(st, k, " c"); k = scatn(st, k, (u32)cache); }
-            if (labels == -1) k = scat(st, k, " nolabels");
-            else if (labels >= 0) { k = scat(st, k, " t"); k = scatn(st, k, tctaken); }
-            if (pics) {                       /* pictures done (and while some are still to come: of how many) */
-                k = scat(st, k, " p"); k = scatn(st, k, pdone);
-                if (pleft) { k = scat(st, k, "/"); k = scatn(st, k, pdone + (u32)pleft); }
-            }
-            if (pics && acc > 0) { k = scat(st, k, " a"); k = scatn(st, k, (u32)acc); }
-            else if (icons) k = scat(st, k, " nopics");
-            if (noicons && icons) k = scat(st, k, " noicons");
-        }
-        else { k = scat(st, k, "partial "); k = scatn(st, k, (u32)done); k = scat(st, k, "/"); k = scatn(st, k, (u32)total); }
-        int changed = 0;
-        for (int i = 0; ; i++) { if (st[i] != last[i]) { changed = 1; break; } if (!st[i]) break; }
-        if (changed) { ftstatus(st); for (int i = 0; i <= k; i++) last[i] = st[i]; }
+        char st[80];
+        ftreport(st, last, left, done, total, cache, labels, pics, pdone, pleft, acc, icons, noicons);
 #ifdef HOST
         out(st); out(" | ");
         if (++hostticks >= HOST_TICKS) return 0;
 #endif
-        long ts[2] = {left || pleft ? 1 : 10, 0};
+        if (pics_state == 2 && (texd == -2 || (texd2 && t >= texd2))) {   /* the pictures unpacked before ours came */
+            int r = texpass();
+            if (r >= 0) texd = (texd > 0 ? texd : 0) + r; else if (texd == -2) texd = r;
+            texd2 = texd2 ? 0 : t + 60;              /* once more some 60 passes later (minutes), then no more */
+        }
+        long ts[2] = {pleft ? 0 : left ? 1 : 10, pleft ? 250000000 : 0};
         sc(SYS_NANOSLEEP, (long)ts, 0, 0, 0, 0);
     }
 }

@@ -19,13 +19,13 @@
 static struct pp {
     const char *path; u32 size; const u8 *head; int count;
     const u32 *off, *len, *old, *nlen, *nhash, *raw, *run, *rlen; const u8 *runs;
-    const u32 *rid; int nrid; const u32 *rix;
+    const u32 *rid; int nrid; const u32 *rix, *ohash;
     const u8 *map; u8 on;
 } pps[] = {
-    {PICDIR "image_cmn_43.uxc", PC_SIZE, pc_head, PC_COUNT, pc_off, pc_len, pc_old, pc_nlen, pc_new, pc_raw, pc_run, pc_rlen, pc_runs, pc_rid, PC_NRID, pc_rix, 0, 0},
-    {PICDIR "image_EVF.uxc", PE_SIZE, pe_head, PE_COUNT, pe_off, pe_len, pe_old, pe_nlen, pe_new, pe_raw, pe_run, pe_rlen, pe_runs, pe_rid, PE_NRID, pe_rix, 0, 0},
-    {PICDIR "image_DSLR_Only_43.uxc", PD_SIZE, pd_head, PD_COUNT, pd_off, pd_len, pd_old, pd_nlen, pd_new, pd_raw, pd_run, pd_rlen, pd_runs, pd_rid, PD_NRID, pd_rix, 0, 0},
-    {PICDIR "image_DSC_Only_43.uxc", PS_SIZE, ps_head, PS_COUNT, ps_off, ps_len, ps_old, ps_nlen, ps_new, ps_raw, ps_run, ps_rlen, ps_runs, ps_rid, PS_NRID, ps_rix, 0, 0},
+    {PICDIR "image_cmn_43.uxc", PC_SIZE, pc_head, PC_COUNT, pc_off, pc_len, pc_old, pc_nlen, pc_new, pc_raw, pc_run, pc_rlen, pc_runs, pc_rid, PC_NRID, pc_rix, pc_ohash, 0, 0},
+    {PICDIR "image_EVF.uxc", PE_SIZE, pe_head, PE_COUNT, pe_off, pe_len, pe_old, pe_nlen, pe_new, pe_raw, pe_run, pe_rlen, pe_runs, pe_rid, PE_NRID, pe_rix, pe_ohash, 0, 0},
+    {PICDIR "image_DSLR_Only_43.uxc", PD_SIZE, pd_head, PD_COUNT, pd_off, pd_len, pd_old, pd_nlen, pd_new, pd_raw, pd_run, pd_rlen, pd_runs, pd_rid, PD_NRID, pd_rix, pd_ohash, 0, 0},
+    {PICDIR "image_DSC_Only_43.uxc", PS_SIZE, ps_head, PS_COUNT, ps_off, ps_len, ps_old, ps_nlen, ps_new, ps_raw, ps_run, ps_rlen, ps_runs, ps_rid, PS_NRID, ps_rix, ps_ohash, 0, 0},
 };
 #define NPP ((int)(sizeof pps / sizeof pps[0]))
 static u8 pbad[NPP][PIC_MAXCOUNT];       /* pictures that didn't come out as expected: left alone */
@@ -156,6 +156,58 @@ static int picfind(u32 id) {
     return -1;
 }
 static int ispic(u32 id) { return picfind(id) >= 0; }
+/* The UI keeps the pictures it has unpacked (textures: exactly the unpacked data, in its graphics memory, which
+ * it maps from /dev/stream) in its label store. A view that stays keeps using its own copy (the menus' highlight
+ * bars, made at the factory before the boot snapshot), so those don't go when our picture comes in: they are
+ * brought up to date where they are. entry: the store's entry for picture id (in process pid); its texture:
+ * entry +0x18 -> +0x18 -> +4 -> a header: 0xabcdef, ..., +0x18 the size in tiles (multiples of 8), ...,
+ * +0x24 its physical address, +0x28 the resource id. Written through our own mapping of /dev/stream (the
+ * UI's way to it), and only when that memory holds exactly Sony's picture (its hash, picpatch.h _ohash): then
+ * it is our picture instead. 1 ours now (or already), 0 not ours or not a texture we know, -1 failed */
+static int sfd = -2;
+static int picpaint(int pid, u32 entry, u32 id) {
+    int ki = picfind(id);
+    if (ki < 0) return 0;
+    int k = ki >> 16, i = ki & 0xffff;
+    if (pbad[k][i] || picstate(k, i) != 1) return 0;
+    u8 w[4]; u32 a = entry;
+    static const u8 hops[3] = {0x18, 0x18, 4};
+    for (int h = 0; h < 3; h++) {
+        if (vrw(pid, a + hops[h], w, 4, 0) != 1) return 0;
+        a = rd32(w);
+        if (!a || (a & 3)) return 0;
+    }
+    u8 hd[0x2c];
+    if (vrw(pid, a, hd, sizeof hd, 0) != 1 || rd32(hd) != 0xabcdefu) return 0;
+    if ((rd32(hd + 0x28) & 0xffffff) != (id & 0xffffff)) return 0;
+    const struct pp *P = &pps[k];
+    u32 dim = rd32(hd + 0x18), aw = dim & 0xffff, ah = dim >> 16, pa = rd32(hd + 0x24);
+    u32 raw = P->raw[i] & 0x3fffffffu;
+    if (!aw || !ah || (aw & 7) || (ah & 7) || aw * ah * 2 != raw || raw > PIC_MAXRAW) return 0;
+    if (pa < RAM_LO || pa - RAM_LO > RAM_SIZE - raw) return 0;
+    if (sfd == -2) sfd = sc(SYS_OPEN, (long)"/dev/stream", 2 | 0x101000 /* O_RDWR | O_SYNC */, 0, 0, 0);
+    if (sfd < 0) return 0;
+    u32 base = pa & ~0xfffu, len = (pa - base + raw + 0xfff) & ~0xfffu;
+    long m = sc6(SYS_MMAP2, 0, len, 3 /* PROT_READ | PROT_WRITE */, 1 /* MAP_SHARED */, sfd, (long)(base >> 12));
+    if ((unsigned long)m >= (unsigned long)-4095L) return 0;
+    volatile u8 *t = (volatile u8 *)m + (pa - base);
+    int r = 0;
+    if (lz_decode(P->map + P->off[i], (int)P->len[i], pbuf, (int)raw) != (int)raw) r = -1;   /* ours, now */
+    else {
+        u32 hsh = 0x811c9dc5u, same = 1;
+        for (u32 j = 0; j < raw; j++) { u8 c = t[j]; hsh = (hsh ^ c) * 0x01000193u; if (c != pbuf[j]) same = 0; }
+        if (same) r = 1;
+        else if (hsh == P->ohash[i]) {                 /* Sony's picture, exactly: ours instead */
+            hold(1);
+            for (u32 j = 0; j < raw; j++) t[j] = pbuf[j];
+            hold(0);
+            r = 1;
+            for (u32 j = 0; j < raw; j++) if (t[j] != pbuf[j]) { r = -1; break; }
+        }
+    }
+    sc(SYS_MUNMAP, m, len, 0, 0, 0);
+    return r;
+}
 
 /* The accent colour of text the UI draws itself (the orange headings, the "50mm" over the live view, ...): two
  * small tables the UI reads as it needs them, color_cmn.uxc (plain colours) and style_cmn.uxc (text styles: a

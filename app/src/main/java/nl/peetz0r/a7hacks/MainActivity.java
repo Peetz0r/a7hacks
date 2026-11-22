@@ -152,35 +152,45 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** The font patcher's progress, from its status line: the font ("partial N/M"), then the pictures ("pN/T"
-     *  while they're being done); once all is in, a short line; nothing while it isn't running. */
+    /** The font patcher's progress, from its status line: the font ("partial N/M") and the pictures ("pN/T"
+     *  while they're being done), together in one bar; once all is in, a short line; nothing while it isn't
+     *  running. (The font's last few glyphs can wait a while for the camera to move on; the pictures go on.) */
     private void showProgress(String ft) {
-        int done = -1, total = -1;
-        String what = null;
-        if (ft != null && ft.startsWith("partial ")) {
-            what = "Font";
-            String[] f = ft.substring(8).trim().split("/");
-            if (f.length == 2) { done = num(f[0]); total = num(f[1]); }
-        } else if (ft != null && ft.startsWith("on ")) {
-            for (String w : ft.split(" ")) {
-                int slash = w.indexOf('/');
-                if (w.length() > 1 && w.charAt(0) == 'p' && Character.isDigit(w.charAt(1)) && slash > 0) {
-                    what = "Pictures"; done = num(w.substring(1, slash)); total = num(w.substring(slash + 1));
+        int fontDone = -1, fontTotal = -1, picDone = -1, picTotal = -1;
+        boolean on = ft != null && ft.startsWith("on ");
+        if (ft != null && (on || ft.startsWith("partial "))) {
+            String[] w = ft.split(" ");
+            if (!on && w.length > 1) {
+                String[] f = w[1].split("/");
+                if (f.length == 2) { fontDone = num(f[0]); fontTotal = num(f[1]); }
+            }
+            for (String x : w) {
+                int slash = x.indexOf('/');
+                if (x.length() > 1 && x.charAt(0) == 'p' && Character.isDigit(x.charAt(1)) && slash > 0) {
+                    picDone = num(x.substring(1, slash)); picTotal = num(x.substring(slash + 1));
                 }
             }
-            if (what == null) {                           // all in
-                progressLabel.setText("Patching done");
-                progressLabel.setVisibility(View.VISIBLE);
-                progressBar.setVisibility(View.GONE);
-                return;
-            }
         }
-        if (what == null || done < 0 || total <= 0) {
+        if (on && picTotal < 0) {                          // all in
+            progressLabel.setText("Patching done");
+            progressLabel.setVisibility(View.VISIBLE);
+            progressBar.setVisibility(View.GONE);
+            return;
+        }
+        int done = 0, total = 0;
+        StringBuilder label = new StringBuilder();
+        if (fontTotal > 0 && fontDone >= 0) { done += fontDone; total += fontTotal; label.append("Font ").append(fontDone).append('/').append(fontTotal); }
+        if (picTotal > 0 && picDone >= 0) {
+            done += picDone; total += picTotal;
+            if (label.length() > 0) label.append("  ");
+            label.append("Pictures ").append(picDone).append('/').append(picTotal);
+        }
+        if (total <= 0) {
             progressLabel.setVisibility(View.INVISIBLE);
             progressBar.setVisibility(View.INVISIBLE);
             return;
         }
-        progressLabel.setText(what + "  " + done + " / " + total);
+        progressLabel.setText(label.toString());
         progressBar.setMax(total);
         progressBar.setProgress(Math.min(done, total));
         progressLabel.setVisibility(View.VISIBLE);

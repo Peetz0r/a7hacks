@@ -24,7 +24,16 @@ LUT = _lut()
 # Pictures that warn (the empty battery): Sony made them orange, next to a red that would have clashed; with the
 # accent green they become red instead: the warm hues pulled down by RED degrees (not below 0: red stays red).
 RED = int(os.environ.get('RED', '30'))
-REDS = {0x205c01b, 0x20e8011}                  # resource ids: the empty battery (image_cmn_43, image_EVF)
+REDS = {                                       # resource ids (image_cmn_43 0x205..., image_EVF 0x20e...):
+    0x205c01b, 0x20e8011,                      # the empty battery
+    0x205c037, 0x20e801d,                      # camera shake ERROR
+    0x205c09d, 0x20e8048, 0x205c09e, 0x20e8049,  # memory card ERROR, FULL
+    0x205c181, 0x20e807c,                      # --E-
+    0x205c200, 0x20e808f,                      # Wi-Fi warning
+    0x205c384, 0x20e8117,                      # GPS ERROR
+    0x205c48c, 0x20e814a,                      # NO CARD
+    0x205d756, 0x20e8775,                      # FINDER ERROR
+}
 def _redlut():
     t = np.arange(4096, dtype=np.uint16)
     if not HUE: return t

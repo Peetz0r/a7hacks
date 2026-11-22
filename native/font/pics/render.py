@@ -27,7 +27,16 @@ def runs(chars):
     """split a line's chars (x0,y0,x1,y1,ch) into runs of one size: (kind, [chars])"""
     out = []
     capmax = max([c[3] - c[1] for c in chars if c[4] not in XH and c[4] not in DESC and c[4] not in SMALL] or [0])
-    for c in chars:
+    # a word space: a gap clearly wider than the line's letter spacing ("NO CARD", where the letters sit close)
+    gs = sorted(chars[i + 1][0] - chars[i][2] for i in range(len(chars) - 1))
+    usual = gs[len(gs) // 2] if gs else 0
+    for i, c in enumerate(chars):
+        if i and len(gs) >= 3 and c[0] - chars[i - 1][2] >= max(4, 2 * usual + 2):
+            out.append([None, []])                         # a new run; its kind is set by its first char
+        if out and out[-1][0] is None:
+            h = c[3] - c[1]
+            out[-1][0] = 'x' if c[4] in XH else ('small' if c[4] not in DESC and c[4] not in SMALL and h < 0.92 * capmax else 'cap')
+            out[-1][1].append(c); continue
         h = c[3] - c[1]
         k = 'x' if c[4] in XH else ('small' if c[4] not in DESC and c[4] not in SMALL and h < 0.92 * capmax else 'cap')
         if out and (out[-1][0] == k or c[4] in DESC or c[4] in SMALL) and c[0] - out[-1][1][-1][2] <= max(2, int(0.3 * capmax)):

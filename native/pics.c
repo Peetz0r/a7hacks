@@ -156,20 +156,51 @@ static int picfind(u32 id) {
     return -1;
 }
 static int ispic(u32 id) { return picfind(id) >= 0; }
-/* The UI keeps the pictures it has unpacked (textures: exactly the unpacked data, in its graphics memory, which
- * it maps from /dev/stream) in its label store. A view that stays keeps using its own copy (the menus' highlight
- * bars, made at the factory before the boot snapshot), so those don't go when our picture comes in: they are
- * brought up to date where they are. entry: the store's entry for picture id (in process pid); its texture:
- * entry +0x18 -> +0x18 -> +4 -> a header: 0xabcdef, ..., +0x18 the size in tiles (multiples of 8), ...,
- * +0x24 its physical address, +0x28 the resource id. Written through our own mapping of /dev/stream (the
- * UI's way to it), and only when that memory holds exactly Sony's picture (its hash, picpatch.h _ohash): then
- * it is our picture instead. 1 ours now (or already), 0 not ours or not a texture we know, -1 failed */
-static int sfd = -2;
+/* ---- textures the UI unpacked before our pictures came in ----
+ * The UI unpacks a picture straight into its graphics memory (which it maps from /dev/stream), exactly as the
+ * file has it unpacked (the GPU's tiled RGBA4444). Views made at the factory, before the boot snapshot (the
+ * menus' highlight bars, the selected tab, the gradient behind the shutter speed, ...), keep the copies they made
+ * then for as long as the camera runs and never read the file again. Such a copy is brought up to date where it
+ * is: through our own mapping of /dev/stream (the way the UI reaches it, so the GPU sees the writes), and only
+ * when it holds exactly Sony's picture (its hash, picpatch.h _ohash), so a header we misread costs nothing.
+ * Two ways to find them: the label store's entries (picpaint, from tcwalk) and the views' own texture headers
+ * (texpass in a7hacks.c). */
+static int sfd = -2;                     /* /dev/stream, opened when first needed */
+/* our picture id (k << 16 | i, from picfind) into the texture at physical address pa, tw x th pixels (whole
+ * tiles): 1 written, 0 ours already or not Sony's picture or not one of ours, -1 failed */
+static int texwrite(int ki, u32 pa, u32 tw, u32 th) {
+    int k = ki >> 16, i = ki & 0xffff;
+    const struct pp *P = &pps[k];
+    if (pbad[k][i] || picstate(k, i) != 1) return 0;
+    u32 raw = P->raw[i] & 0x3fffffffu;
+    if (!tw || !th || (tw & 7) || (th & 7) || tw * th * 2 != raw || raw > PIC_MAXRAW || (pa & 3)) return 0;
+    if (pa < RAM_LO || pa - RAM_LO > RAM_SIZE - raw) return 0;
+    if (sfd == -2) sfd = sc(SYS_OPEN, (long)"/dev/stream", 2 | 0x101000 /* O_RDWR | O_SYNC */, 0, 0, 0);
+    if (sfd < 0) return -1;
+    if (lz_decode(P->map + P->off[i], (int)P->len[i], pbuf, (int)raw) != (int)raw) return -1;   /* ours */
+    u32 base = pa & ~0xfffu, len = (pa - base + raw + 0xfff) & ~0xfffu;
+    long m = sc6(SYS_MMAP2, 0, len, 3 /* PROT_READ | PROT_WRITE */, 1 /* MAP_SHARED */, sfd, (long)(base >> 12));
+    if ((unsigned long)m >= (unsigned long)-4095L) return -1;
+    volatile u8 *t = (volatile u8 *)m + (pa - base);
+    u32 hsh = 0x811c9dc5u, same = 1;
+    for (u32 j = 0; j < raw; j++) { u8 c = t[j]; hsh = (hsh ^ c) * 0x01000193u; if (c != pbuf[j]) same = 0; }
+    int r = 0;
+    if (!same && hsh == P->ohash[i]) {             /* Sony's picture, exactly: ours instead */
+        hold(1);
+        for (u32 j = 0; j < raw; j++) t[j] = pbuf[j];
+        hold(0);
+        r = 1;
+        for (u32 j = 0; j < raw; j++) if (t[j] != pbuf[j]) { r = -1; break; }
+    }
+    sc(SYS_MUNMAP, m, len, 0, 0, 0);
+    return r;
+}
+/* the label store's entry for picture id (in process pid), in use: its texture brought up to date. The texture:
+ * entry +0x18 -> +0x18 -> +4 -> a header: 0xabcdef, ..., +0x18 the size in tiles, ..., +0x24 its physical
+ * address, +0x28 the resource id. */
 static int picpaint(int pid, u32 entry, u32 id) {
     int ki = picfind(id);
     if (ki < 0) return 0;
-    int k = ki >> 16, i = ki & 0xffff;
-    if (pbad[k][i] || picstate(k, i) != 1) return 0;
     u8 w[4]; u32 a = entry;
     static const u8 hops[3] = {0x18, 0x18, 4};
     for (int h = 0; h < 3; h++) {
@@ -180,33 +211,8 @@ static int picpaint(int pid, u32 entry, u32 id) {
     u8 hd[0x2c];
     if (vrw(pid, a, hd, sizeof hd, 0) != 1 || rd32(hd) != 0xabcdefu) return 0;
     if ((rd32(hd + 0x28) & 0xffffff) != (id & 0xffffff)) return 0;
-    const struct pp *P = &pps[k];
-    u32 dim = rd32(hd + 0x18), aw = dim & 0xffff, ah = dim >> 16, pa = rd32(hd + 0x24);
-    u32 raw = P->raw[i] & 0x3fffffffu;
-    if (!aw || !ah || (aw & 7) || (ah & 7) || aw * ah * 2 != raw || raw > PIC_MAXRAW) return 0;
-    if (pa < RAM_LO || pa - RAM_LO > RAM_SIZE - raw) return 0;
-    if (sfd == -2) sfd = sc(SYS_OPEN, (long)"/dev/stream", 2 | 0x101000 /* O_RDWR | O_SYNC */, 0, 0, 0);
-    if (sfd < 0) return 0;
-    u32 base = pa & ~0xfffu, len = (pa - base + raw + 0xfff) & ~0xfffu;
-    long m = sc6(SYS_MMAP2, 0, len, 3 /* PROT_READ | PROT_WRITE */, 1 /* MAP_SHARED */, sfd, (long)(base >> 12));
-    if ((unsigned long)m >= (unsigned long)-4095L) return 0;
-    volatile u8 *t = (volatile u8 *)m + (pa - base);
-    int r = 0;
-    if (lz_decode(P->map + P->off[i], (int)P->len[i], pbuf, (int)raw) != (int)raw) r = -1;   /* ours, now */
-    else {
-        u32 hsh = 0x811c9dc5u, same = 1;
-        for (u32 j = 0; j < raw; j++) { u8 c = t[j]; hsh = (hsh ^ c) * 0x01000193u; if (c != pbuf[j]) same = 0; }
-        if (same) r = 1;
-        else if (hsh == P->ohash[i]) {                 /* Sony's picture, exactly: ours instead */
-            hold(1);
-            for (u32 j = 0; j < raw; j++) t[j] = pbuf[j];
-            hold(0);
-            r = 1;
-            for (u32 j = 0; j < raw; j++) if (t[j] != pbuf[j]) { r = -1; break; }
-        }
-    }
-    sc(SYS_MUNMAP, m, len, 0, 0, 0);
-    return r;
+    u32 dim = rd32(hd + 0x18);
+    return texwrite(ki, rd32(hd + 0x24), dim & 0xffff, dim >> 16);
 }
 
 /* The accent colour of text the UI draws itself (the orange headings, the "50mm" over the live view, ...): two
@@ -262,4 +268,4 @@ static int colours(int on) {
     for (unsigned c = 0; c < sizeof cts / sizeof cts[0]; c++) { int r = colours1(&cts[c], on); if (r < 0) bad = r; else n += r; }
     return n ? n : bad;
 }
-static void picsreset(void) { for (int k = 0; k < NPP; k++) { pps[k].map = 0; pps[k].on = 0; } picflush = 0; for (unsigned c = 0; c < sizeof cts / sizeof cts[0]; c++) cts[c].map = 0; }
+static void picsreset(void) { for (int k = 0; k < NPP; k++) { pps[k].map = 0; pps[k].on = 0; } picflush = 0; if (sfd >= 0) sc(SYS_CLOSE, sfd, 0, 0, 0, 0); sfd = -2; for (unsigned c = 0; c < sizeof cts / sizeof cts[0]; c++) cts[c].map = 0; }

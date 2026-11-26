@@ -77,7 +77,7 @@
  * that isn't exactly the one this was made for (status gets "noicons" / "nopics"). Status (on N [cM | nocache]
  * [tK | nolabels] [pP[/T] | nopics] [aA] [noicons] | partial N/M [pP/T] | off [pics] | badfile | error ...; M = cached
  * characters marked; P/T: pictures done of how many, while they are still being done; hH: the time in 24 hours
- * (pics.c, clock24) in H places; fF, sS: seconds from the
+ * (pics.c, clock24) in H places; iI: live view shows the focal length I instead of F--; fF, sS: seconds from the
  * patcher's start until the font, and the pictures, were all in) goes to
  * /android/dev/a7hacks.ft. A stop (SIGTERM, the app's Restart) is held off while
  * the patcher writes, so nothing is left half written.
@@ -1540,6 +1540,13 @@ static u32 secs(void) {
 }
 static u32 tookf, tookp;              /* seconds the patcher took to get the font, the pictures in (0: not yet) */
 
+/* the focal length set for SteadyShot while the lens mount says no electronic lens (MOUNT: only once checksigs
+ * found the camera's code the one we know), else 0 */
+static u32 manualfl(void) {
+    u8 mnt[4];
+    u32 mm = steadyshot();
+    return (pread_(MOUNT, mnt, 4) == 0 && rd32(mnt) == 0 && mm > 0 && mm < 10000) ? mm : 0;
+}
 static int h24n;                      /* the 24 hour time: how many of its patches are ours (hN in the status) */
 static void ftreport(char *st, char *last, int left, int done, int total, int cache, int labels, int pics,
                      u32 pdone, int pleft, int acc, int icons, int noicons) {
@@ -1558,6 +1565,7 @@ static void ftreport(char *st, char *last, int left, int done, int total, int ca
     if (!left) {
         if (pics && acc > 0) { k = scat(st, k, " a"); k = scatn(st, k, (u32)acc); }
         if (pics && h24n > 0) { k = scat(st, k, " h"); k = scatn(st, k, (u32)h24n); }
+        if (pics && irisin > 0) { k = scat(st, k, " i"); k = scatn(st, k, irisin); }
         else if (icons) k = scat(st, k, " nopics");
         if (pics && texd >= 0) { k = scat(st, k, " g"); k = scatn(st, k, (u32)(texd + (texe > 0 ? texe : 0))); }
         if (noicons && icons) k = scat(st, k, " noicons");
@@ -1608,6 +1616,7 @@ static int font(int on, int icons) {
     int pics_state = 0;               /* 2: all our pictures are in */
     texd = -2; u32 texd2 = 0;         /* textures brought up to date (-2: not looked yet, -1: can't), next look */
     texe = -1;                        /* -1: the first pictures aren't all in yet */
+    int mountok = checksigs() > 0;    /* the camera's code is the one we know: MOUNT (the lens mount) can be read */
     u32 t0 = secs(); tookf = tookp = 0;   /* for the time it takes (fF, sS in the status) */
     sc(SYS_NICE, 19, 0, 0, 0, 0);     /* the camera comes first: unpacking and packing pictures takes a while */
     char last[80]; last[0] = 0;
@@ -1630,6 +1639,7 @@ static int font(int on, int icons) {
             }
         }
         int acc = pics ? colours(1) : 0;      /* the text accent colour too */
+        irisfl = pics && mountok ? manualfl() : 0;   /* a lens that tells no aperture: its focal length for F-- */
         h24n = pics ? clock24(1) : 0;         /* and the time in 24 hours */
         int pleft = 0;
         if (pics && pics_state != 2) {         /* a batch at a time; once all are in, the label store's copies go */
@@ -1674,7 +1684,20 @@ static int font(int on, int icons) {
         /* while pictures are left only a moment (nice 19 already lets the camera go first): a quarter second
          * after every batch was about 50 s of the patcher's time */
         long ts[2] = {pleft ? 0 : left ? 1 : 10, pleft ? 10000000 : 0};
-        sc(SYS_NANOSLEEP, (long)ts, 0, 0, 0, 0);
+        if (ts[0] == 10 && pics && mountok) {
+            /* the 10 s between passes a second at a time: a new focal length (the SteadyShot setting, read every
+             * second) gets to the label at once, so it's there when the camera next draws it */
+            for (int w = 0; w < 10; w++) {
+                long one[2] = {1, 0};
+                sc(SYS_NANOSLEEP, (long)one, 0, 0, 0, 0);
+                u32 nf = manualfl();
+                if (nf != irisfl) {
+                    irisfl = nf; h24n = clock24(1);
+                    char st2[80];
+                    ftreport(st2, last, left, done, total, cache, labels, pics, pdone, pleft, acc, icons, noicons);
+                }
+            }
+        } else sc(SYS_NANOSLEEP, (long)ts, 0, 0, 0, 0);
     }
 }
 

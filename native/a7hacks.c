@@ -19,6 +19,7 @@
  *                                                 --all: and the driver memory it has mapped, RAM pages only)
  *   liba7hacks.so --screenshot path               Sony's own screen (its OSD, not the live view) to path as a PNG
  *   liba7hacks.so --pic-census                    which of our pictures the UI has unpacked now (read only)
+ *   liba7hacks.so --pic-bench                     time the picture patcher's steps on the camera (changes nothing)
  *   liba7hacks.so --glyph-cache [--mark-stale | --list] [--all]
  *                                                 UI font: show the UI's glyph cache (--mark-stale: and mark it
  *                                                 stale; --list: and list, with pictures, the glyphs drawn since;
@@ -1461,6 +1462,77 @@ static int census(void) {
     return 0;
 }
 
+/* --pic-bench: where the font patcher's time goes with the pictures, measured on the camera: each picture as it
+ * is in RAM now (after a patch: ours) unpacked, cleared and coloured, our pixels put in, packed, hashed, and
+ * "written" the patcher's way (physical address, /dev/mem) into a buffer of our own; at nice 19, like the
+ * patcher. Writes nothing of the camera's. First: how many of the files' pages are in RAM (mincore). */
+#define SYS_MINCORE 219
+static u8 benchw[PIC_MAXRAW + PIC_MAXRAW / 8 + 4096];
+static u32 usnow(void) {          /* microseconds, wrapping: only differences count */
+    long ts[2]; ts[0] = ts[1] = 0;
+    sc(SYS_CLOCK_GETTIME, 1, (long)ts, 0, 0, 0);
+    return (u32)ts[0] * 1000000u + (u32)ts[1] / 1000u;
+}
+static int bench(void) {
+    fd = sc(SYS_OPEN, (long)"/dev/mem", 2, 0, 0, 0);
+    if (fd < 0) { out("error open /dev/mem"); return 2; }
+    mypid = sc(SYS_GETPID, 0, 0, 0, 0, 0);
+    sc(SYS_NICE, 19, 0, 0, 0, 0);
+    for (u32 j = 0; j < sizeof benchw; j += 4096) benchw[j] = 1;      /* its pages there */
+    static u32 tt[6]; u32 t0 = usnow(), n = 0, bytes = 0, res = 0, pages = 0, slow = 0, nslow = 0;
+    static u8 vec[8192];
+    for (int k = 0; k < NPP; k++) {
+        if (picmap(k, 0) < 0) continue;
+        struct pp *P = &pps[k];
+        u32 np = (P->size + 4095) / 4096;
+        if (np <= sizeof vec && sc(SYS_MINCORE, (long)P->map, P->size, (long)vec, 0, 0) == 0)
+            for (u32 j = 0; j < np; j++) { pages++; res += vec[j] & 1; }
+        for (int i = 0; i < P->count; i++) {
+            u32 R = P->raw[i], raw = R & 0x1fffffffu;
+            const u16 *tab = R >> 30 & 1 ? pic_red : R >> 29 & 1 ? pic_blue : pic_hue;
+            u32 a = usnow();
+            if (lz_decode(P->map + P->off[i], (int)P->len[i], pbuf, (int)raw) != (int)raw) continue;
+            u32 b = usnow();
+            for (u32 j = 0; j + 1 < raw; j += 2) if (!(pbuf[j] & 15)) pbuf[j] = pbuf[j + 1] = 0;
+            if (R >> 31)
+                for (u32 j = 0; j + 1 < raw; j += 2) {
+                    u32 px = pbuf[j] | (u32)pbuf[j + 1] << 8, c = tab[px >> 4];
+                    pbuf[j] = (u8)((c & 15) << 4 | (px & 15)); pbuf[j + 1] = (u8)(c >> 4);
+                }
+            u32 c = usnow();
+            u32 rl = P->rlen[i];
+            if (rl <= PIC_MAXRUNS && lz_decode(P->runs + P->run[i], 0x7fffffff, prun, (int)rl) == (int)rl) {
+                const u8 *q = prun, *qe = prun + rl; u32 pos = 0;
+                while (q + 4 <= qe) {
+                    u32 sk = q[0] | q[1] << 8, cn = q[2] | q[3] << 8; q += 4;
+                    if (!sk && !cn) break;
+                    pos += sk;
+                    if ((pos + cn) * 2 > raw || q + 2 * cn > qe) break;
+                    for (u32 j = 0; j < cn; j++, pos++, q += 2) { pbuf[2 * pos] = q[0]; pbuf[2 * pos + 1] = q[1]; }
+                }
+            }
+            u32 d = usnow();
+            int m = lz_encode(pbuf, (int)raw, pout, !(P->nlen[i] >> 31));
+            u32 e = usnow();
+            volatile u32 h = pfnv(pout, (u32)m) ^ pfnv(P->map + P->off[i], P->len[i]); (void)h;
+            u32 f = usnow();
+            vrw(mypid, (u32)(unsigned long)benchw, pout, m, 1);
+            u32 g = usnow();
+            tt[0] += b - a; tt[1] += c - b; tt[2] += d - c; tt[3] += e - d; tt[4] += f - e; tt[5] += g - f;
+            if (P->nlen[i] >> 31) { slow += e - d; nslow++; }
+            n++; bytes += raw;
+        }
+        picunmap(k);
+    }
+    u32 all = usnow() - t0;
+    static const char *nm[6] = {" unpack ", ", colour ", ", ours ", ", pack ", ", hash ", ", write "};
+    out("bench "); outn(n); out(" pictures, "); outn(bytes >> 10); out(" KB, "); outn(all / 1000u); out(" ms:");
+    for (int x = 0; x < 6; x++) { out(nm[x]); outn(tt[x] / 1000u); out(" ms"); }
+    out(" (of which the "); outn(nslow); out(" packed the cheapest way: "); outn(slow / 1000u); out(" ms)");
+    out("; pages in RAM before: "); outn(res); out("/"); outn(pages);
+    return 0;
+}
+
 /* seconds since some fixed moment (CLOCK_MONOTONIC: not moved by --set-clock) */
 static u32 secs(void) {
 #ifdef HOST
@@ -1721,6 +1793,7 @@ static int run(int argc, char **argv) {
     if (argc == 2 && eq(o, "--set-clock")) return setclock();
     if (argc == 3 && eq(o, "--screenshot")) return screenshot(argv[2]);
     if (argc == 2 && eq(o, "--pic-census")) return census();
+    if (argc == 2 && eq(o, "--pic-bench")) return bench();
     if (eq(o, "--memory-dump") && (argc == 3 || (argc == 4 && eq(argv[3], "--all")))) return memdump(argv[2], argc == 4);
     if (eq(o, "--glyph-cache")) {
         int mode = 0;

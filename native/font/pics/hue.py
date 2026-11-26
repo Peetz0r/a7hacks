@@ -9,17 +9,20 @@ import numpy as np
 HUE = int(os.environ.get('HUE', '75'))
 WARM = (340, 70)                       # hues counted as warm: 340..360 and 0..70 degrees
 
-def _lut():
+def _table(turn):
+    """a table from each 12-bit colour to its new one: the warm ones get the hue turn(h) (h and the result in turns,
+    0..1, as colorsys has them: in degrees, rounding would come out differently for a few colours), all others stay
+    as they are"""
     t = np.arange(4096, dtype=np.uint16)
     if not HUE: return t
     for c in range(4096):
         r, g, b = (c >> 8 & 15) / 15, (c >> 4 & 15) / 15, (c & 15) / 15
         h, s, v = colorsys.rgb_to_hsv(r, g, b)
         if s == 0 or not (h * 360 >= WARM[0] or h * 360 < WARM[1]): continue
-        r2, g2, b2 = colorsys.hsv_to_rgb((h + HUE / 360) % 1, s, v)
+        r2, g2, b2 = colorsys.hsv_to_rgb(turn(h), s, v)
         t[c] = int(round(r2 * 15)) << 8 | int(round(g2 * 15)) << 4 | int(round(b2 * 15))
     return t
-LUT = _lut()
+LUT = _table(lambda h: (h + HUE / 360) % 1)
 
 # Pictures that warn (the empty battery): Sony made them orange, next to a red that would have clashed; with the
 # accent green they become red instead: the warm hues pulled down by RED degrees (not below 0: red stays red).
@@ -34,17 +37,7 @@ REDS = {                                       # resource ids (image_cmn_43 0x20
     0x205c48c, 0x20e814a,                      # NO CARD
     0x205d756, 0x20e8775,                      # FINDER ERROR
 }
-def _redlut():
-    t = np.arange(4096, dtype=np.uint16)
-    if not HUE: return t
-    for c in range(4096):
-        r, g, b = (c >> 8 & 15) / 15, (c >> 4 & 15) / 15, (c & 15) / 15
-        h, s, v = colorsys.rgb_to_hsv(r, g, b)
-        if s == 0 or not (h * 360 < WARM[1]): continue
-        r2, g2, b2 = colorsys.hsv_to_rgb(max(0.0, h - RED / 360), s, v)
-        t[c] = int(round(r2 * 15)) << 8 | int(round(g2 * 15)) << 4 | int(round(b2 * 15))
-    return t
-REDLUT = _redlut()
+REDLUT = _table(lambda h: h if h * 360 >= WARM[0] else max(0.0, h - RED / 360))    # 340..360: red already, kept
 
 def apply(p, red=False):
     """the picture (uint16 RGBA4444) with the table applied (alpha kept); red: the warning table instead"""

@@ -295,6 +295,10 @@ static int colours(int on) {
  *  - playback, the line under the picture (viewUnified2.so, the ACT_ widget after ACT_IconNdFilterAct: time
  *    as "${v1:2}:${v2:02}${v3}", v3 AM/PM or, for D-M-Y, empty with the hour as it is): "cmp r3, #3" (the
  *    date format) becomes "cmp r3, r3", so always the D-M-Y way, Thumb at 0x2e489a;
+ *  - playback's index (the grid; PAS_Index::reqScroll, viewUnified2.so): the chosen picture's date and time,
+ *    per date format (a jump table, object +0xa88); each format's time part starts "add.w r5, r5, #0x718;
+ *    ldr r1, =template": in Y-M-D, M-D-Y and M(Eng)-D-Y the ldr becomes "b" to D-M-Y's ldr (0x316cd4), which
+ *    goes on the same way with the hour as it is (Thumb at 0x316a3e, 0x316b1a, 0x316c02);
  *  - ViewGpsInfo in viewUnified8.so (a picture's date, and its time as hour, minutes and AM/PM): after giving the date its order (setFormatType) it takes the 24 hour way only for format 3:
  *    "cmp r5, #3 ... beq" becomes "movs r5, #3 ... b" (r5 is used further on as for D-M-Y), Thumb at 0x26142
  *    and 0x26148;
@@ -302,19 +306,24 @@ static int colours(int on) {
  *    per date format, 1 = 24 hours (Sony's 0, 0, 0, 1): Y-M-D's becomes 1.
  * Into the camera's in-memory copy of each library, like the colours (its page kept there while the font
  * patcher runs), only if the whole page is exactly the one we know (its hash with Sony's bytes in our places)
- * and each place holds Sony's bytes or ours. Written in order (backwards when putting Sony's back), so a half
- * done change is still Sony's way; code is followed by an instruction cache flush. on: ours, off: Sony's.
+ * and each place holds Sony's bytes or ours. Written a byte at a time, in order (backwards when putting Sony's
+ * back), chosen so that the UI, should it run that code just then, finds no half written instruction it could
+ * trip over (at worst a wrong number or text for a moment); code is followed by an instruction cache flush. on: ours, off: Sony's.
  * Returns how many places are ours, or <0. */
 static struct h24f { const char *path; u32 size, page, hash; const u8 *map; } h24fs[] = {
     {"/usr/lib/viewUnified8.so", 232804u, 0x26000u, 0xa6f67cb8u, 0},
     {"/usr/lib/viewUnified2.so", 5317568u, 0x40a000u, 0x6a85a2efu, 0},
     {"/usr/lib/viewUnified2.so", 5317568u, 0x2e4000u, 0xa6ae5667u, 0},
+    {"/usr/lib/viewUnified2.so", 5317568u, 0x316000u, 0x95a0481du, 0},
 };
 static const struct h24p { int f; u32 off; u8 n, old[2], nw[2]; } h24ps[] = {
     {0, 0x26142u, 2, {0x03, 0x2d}, {0x03, 0x25}},     /* cmp r5, #3  ->  movs r5, #3 */
     {0, 0x26148u, 2, {0x2d, 0xd0}, {0x2d, 0xe0}},     /* beq (24 hours)  ->  b */
     {1, 0x40a314u, 1, {0x00}, {0x01}},                /* Y-M-D: 12 hours  ->  24 */
     {2, 0x2e489au, 2, {0x03, 0x2b}, {0x9b, 0x42}},    /* cmp r3, #3  ->  cmp r3, r3 */
+    {3, 0x316a3eu, 2, {0xbb, 0x49}, {0x49, 0xe1}},    /* ldr r1, =template  ->  b 0x316cd4 (half: ldr r1, other) */
+    {3, 0x316b1au, 2, {0x84, 0x49}, {0xdb, 0xe0}},
+    {3, 0x316c02u, 2, {0x4a, 0x49}, {0x67, 0xe0}},
 };
 #define NH24F ((int)(sizeof h24fs / sizeof h24fs[0]))
 #define NH24P ((int)(sizeof h24ps / sizeof h24ps[0]))
@@ -359,8 +368,12 @@ static int clock24(int on) {
         int same = 1;
         for (int j = 0; j < P->n; j++) if (q[j] != want[j]) same = 0;
         if (!same) {
+            int r = 1;
             hold(1);
-            int r = vrw(mypid, (u32)(unsigned long)q, (u8 *)want, P->n, 1);
+            for (int j = 0; j < P->n && r > 0; j++) {      /* a byte at a time: low first, Sony's back high first */
+                int b = on ? j : P->n - 1 - j;
+                if (q[b] != want[b]) r = vrw(mypid, (u32)(unsigned long)(q + b), (u8 *)want + b, 1, 1);
+            }
             sc(0xf0002 /* ARM cacheflush */, (long)q, (long)(q + P->n), 0, 0, 0);
             hold(0);
             if (r <= 0) { bad = -3; continue; }

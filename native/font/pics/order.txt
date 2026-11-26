@@ -1,0 +1,167 @@
+# The order the font patcher puts the pictures in (font/pics/mkpicheader.py turns this into pic_ord in picpatch.h):
+# the "first" lines first, in this order, then everything not named here, then the "last" lines. A line:
+#   first|last id 0x02......         one picture (its resource id)
+#   first|last size WxH              every picture of that size
+#   first|last stretch               the stretchable pictures (highlight bars, boxes)
+#   first|last level                 the level's pictures (the ones in blue)
+# The first ones: those seen most (--pic-census, sampled while using the camera: live view, Fn, menus; most
+# seen first), the backgrounds, the highlights, the level. The last ones: hardly ever or never seen.
+first id 0x0205c001    # 104x32, seen in 7/7
+first id 0x0205c02d    # 56x48, seen in 7/7
+first id 0x0205c1ca    # 72x56, seen in 7/7
+first id 0x0205c3f8    # 48x40, seen in 7/7
+first id 0x0205c5b3    # 64x40, seen in 7/7
+first id 0x0205c6c5    # 72x56, seen in 7/7
+first id 0x0205cb20    # 40x48, seen in 7/7
+first id 0x0205cb2f    # 40x48, seen in 7/7
+first id 0x0205cb30    # 40x48, seen in 7/7
+first id 0x0205cb31    # 40x48, seen in 7/7
+first id 0x0205cb32    # 40x48, seen in 7/7
+first id 0x0205cb33    # 40x48, seen in 7/7
+first id 0x0205cb34    # 40x48, seen in 7/7
+first id 0x0205cb35    # 40x48, seen in 7/7
+first id 0x0205cb36    # 40x48, seen in 7/7
+first id 0x0205cb37    # 40x48, seen in 7/7
+first id 0x0205cb38    # 40x48, seen in 7/7
+first id 0x0205d187    # 280x112, seen in 7/7
+first id 0x0205d230    # 88x40, seen in 7/7
+first id 0x0205d2a2    # 280x112, seen in 7/7
+first id 0x0205d77b    # 72x56, seen in 7/7
+first id 0x0205da60    # 96x48, seen in 7/7
+first id 0x0205d13a    # 88x40, seen in 6/7
+first id 0x0205d2a0    # 280x112, seen in 6/7
+first id 0x0205d2a1    # 280x112, seen in 6/7
+first id 0x0205d2ce    # 88x40, seen in 6/7
+first id 0x0205c1cb    # 72x56, seen in 5/7
+first id 0x0205c1cc    # 72x56, seen in 5/7
+first id 0x0205cb25    # 40x48, seen in 5/7
+first id 0x0205c1c9    # 72x56, seen in 4/7
+first id 0x0205c72b    # 120x104, seen in 4/7
+first id 0x0205c012    # 48x32, seen in 4/7
+first id 0x0205c033    # 56x72, seen in 4/7
+first id 0x0205c090    # 24x24, seen in 4/7
+first id 0x0205c165    # 72x64, seen in 4/7
+first id 0x0205c20d    # 72x64, seen in 4/7
+first id 0x0205c365    # 72x64, seen in 4/7
+first id 0x0205c37a    # 48x32, seen in 4/7
+first id 0x0205c3b6    # 72x64, seen in 4/7
+first id 0x0205c3b7    # 72x64, seen in 4/7
+first id 0x0205c3ba    # 72x64, seen in 4/7
+first id 0x0205c3bd    # 72x64, seen in 4/7
+first id 0x0205c3bf    # 72x64, seen in 4/7
+first id 0x0205c3c2    # 72x64, seen in 4/7
+first id 0x0205c3c4    # 72x64, seen in 4/7
+first id 0x0205c3c5    # 72x64, seen in 4/7
+first id 0x0205c3c6    # 72x64, seen in 4/7
+first id 0x0205c3c7    # 72x64, seen in 4/7
+first id 0x0205c3c9    # 72x64, seen in 4/7
+first id 0x0205c3ca    # 72x64, seen in 4/7
+first id 0x0205c3cc    # 72x64, seen in 4/7
+first id 0x0205c3cd    # 72x64, seen in 4/7
+first id 0x0205c461    # 64x40, seen in 4/7
+first id 0x0205c52b    # 72x64, seen in 4/7
+first id 0x0205c550    # 80x32, seen in 4/7
+first id 0x0205c5b8    # 72x64, seen in 4/7
+first id 0x0205c5d5    # 48x32, seen in 4/7
+first id 0x0205c679    # 72x64, seen in 4/7
+first id 0x0205c7a6    # 72x40, seen in 4/7
+first id 0x0205c8d8    # 64x32, seen in 4/7
+first id 0x0205c8dd    # 640x480, seen in 4/7
+first id 0x0205d232    # 72x64, seen in 4/7
+first id 0x0205d4eb    # 312x80, seen in 4/7
+first id 0x0205d755    # 72x64, seen in 4/7
+first id 0x0205dca2    # 72x64, seen in 4/7
+first id 0x0205df22    # 88x40, seen in 4/7
+first id 0x0205df2b    # 72x64, seen in 4/7
+first id 0x0205df2c    # 72x64, seen in 4/7
+first id 0x0205df2d    # 72x64, seen in 4/7
+first id 0x0205df42    # 72x64, seen in 4/7
+first id 0x0205df44    # 72x64, seen in 4/7
+first id 0x0205df68    # 72x64, seen in 4/7
+first id 0x0205df7b    # 72x64, seen in 4/7
+first id 0x0205df89    # 72x64, seen in 4/7
+first id 0x0205df94    # 72x64, seen in 4/7
+first id 0x0205df98    # 72x64, seen in 4/7
+first id 0x0205df9a    # 72x64, seen in 4/7
+first id 0x0205df9b    # 72x64, seen in 4/7
+first id 0x0205dfa5    # 72x64, seen in 4/7
+first id 0x0205dfa6    # 72x64, seen in 4/7
+first id 0x0205dfa8    # 72x64, seen in 4/7
+first id 0x0205dfb5    # 72x64, seen in 4/7
+first id 0x0205dfb7    # 72x64, seen in 4/7
+first id 0x0205dfbf    # 72x64, seen in 4/7
+first id 0x0205dfc1    # 72x64, seen in 4/7
+first id 0x0205dfc2    # 72x64, seen in 4/7
+first id 0x0205dfca    # 72x64, seen in 4/7
+first id 0x0205dfcc    # 72x64, seen in 4/7
+first id 0x0205dfcf    # 72x64, seen in 4/7
+first id 0x0205dfd4    # 72x64, seen in 4/7
+first id 0x0205dfd7    # 72x64, seen in 4/7
+first id 0x0205dfd8    # 72x64, seen in 4/7
+first id 0x0205c5f5    # 120x104, seen in 3/7
+first id 0x0205cb24    # 40x48, seen in 3/7
+first id 0x0205df3a    # 72x64, seen in 3/7
+first id 0x0205c3b3    # 72x64, seen in 3/7
+first id 0x0205c3b4    # 72x64, seen in 3/7
+first id 0x0205c3b9    # 72x64, seen in 3/7
+first id 0x0205c3bc    # 72x64, seen in 3/7
+first id 0x0205c3c0    # 72x64, seen in 3/7
+first id 0x0205c3c3    # 72x64, seen in 3/7
+first id 0x0205c3c8    # 72x64, seen in 3/7
+first id 0x0205c3cb    # 72x64, seen in 3/7
+first id 0x0205c3cf    # 72x64, seen in 3/7
+first id 0x0205d273    # 280x112, seen in 3/7
+first id 0x0205d275    # 280x112, seen in 3/7
+first id 0x0205d27a    # 280x112, seen in 3/7
+first id 0x0205d27b    # 280x112, seen in 3/7
+first id 0x0205d355    # 88x40, seen in 3/7
+first id 0x0205d35d    # 88x40, seen in 3/7
+first id 0x0205d38e    # 88x40, seen in 3/7
+first id 0x0205d391    # 88x40, seen in 3/7
+first id 0x0205d393    # 88x40, seen in 3/7
+first id 0x0205d397    # 88x40, seen in 3/7
+first id 0x0205d39d    # 280x112, seen in 3/7
+first id 0x0205d3a2    # 280x112, seen in 3/7
+first id 0x0205d3a3    # 280x112, seen in 3/7
+first id 0x0205d3cb    # 280x112, seen in 3/7
+first id 0x0205d448    # 88x40, seen in 3/7
+first id 0x0205d46e    # 88x40, seen in 3/7
+first id 0x0205d46f    # 88x40, seen in 3/7
+first id 0x0205d471    # 88x40, seen in 3/7
+first id 0x0205c3d9    # 72x64, seen in 2/7
+first id 0x0205debc    # 72x64, seen in 2/7
+first id 0x0205debd    # 72x64, seen in 2/7
+first id 0x0205df3c    # 72x64, seen in 2/7
+first id 0x0205df43    # 72x64, seen in 2/7
+first id 0x0205c351    # 40x40, seen in 2/7
+first id 0x0205d13b    # 88x40, seen in 2/7
+first id 0x0205d3a0    # 280x112, seen in 2/7
+first id 0x0205d3a1    # 280x112, seen in 2/7
+first id 0x0205d3c5    # 280x112, seen in 2/7
+first id 0x0205d432    # 88x40, seen in 2/7
+first id 0x0205d434    # 280x112, seen in 2/7
+first id 0x0205d46c    # 88x40, seen in 2/7
+first id 0x0205cb22    # 40x48, seen in 1/7
+first id 0x0205cb23    # 40x48, seen in 1/7
+first id 0x0205cb26    # 40x48, seen in 1/7
+first id 0x0205cb27    # 40x48, seen in 1/7
+first id 0x0205cb28    # 40x48, seen in 1/7
+first id 0x0205cb29    # 40x48, seen in 1/7
+first id 0x0205df34    # 72x64, seen in 1/7
+first id 0x0205df39    # 72x64, seen in 1/7
+first id 0x0205df3b    # 72x64, seen in 1/7
+first id 0x0205df3e    # 72x64, seen in 1/7
+first id 0x0205df3f    # 72x64, seen in 1/7
+first id 0x0205df40    # 72x64, seen in 1/7
+first id 0x0205df79    # 72x64, seen in 1/7
+first id 0x0205dfac    # 72x64, seen in 1/7
+first id 0x0205dfb2    # 72x64, seen in 1/7
+first id 0x0205dfc5    # 72x64, seen in 1/7
+first size 640x480               # the backgrounds
+first stretch
+first level
+last size 128x390                # the time zone picker
+last size 202x152                # pictures of the camera's own screens
+last size 300x225
+last size 352x252                # font test sheets
+last size 544x92                 # a line pointing to Sony's website

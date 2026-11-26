@@ -35,6 +35,8 @@ Scripts
               else medium (a longer search), else the cheapest), and a hash of the original; Sony's own pixels are not in it
   mkpicheader.py  turns those into ../../picpatch.h for a7hacks.c (the font patcher unpacks the original from the file in RAM,
               puts our pixels in, packs it and writes it only if length and hash come out as computed here)
+  order.txt   the order the camera does them in (seen most first: what --pic-census found on screen, the
+              backgrounds, highlights and level; hardly ever seen last); mkpicheader.py makes pic_ord from it
   overrides.py  lines whose reading is settled another way, used by mkpics: a person's reading from the
               review page (answers.json; only where it fits the shapes found), or a word confirmed
               elsewhere in the pictures (only if it differs in one letter at most, never a digit), or listed in

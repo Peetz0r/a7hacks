@@ -130,24 +130,28 @@ static int picsopen(void) {
  * *left: how many still to do. Hashing every picture each time cost more than the pictures themselves (15 MB,
  * four times a second), so while there is a budget only the ones not known to be ours yet are looked at, and
  * once the budget is spent the rest only counted; budget 0 (once all are in) looks at every one again. */
+static int picfirstin;                   /* the first PIC_NFIRST of pic_ord (the ones seen most) are all in */
 static u32 picsdo(int budget, int *left) {
-    u32 done = 0; *left = 0; int check = budget == 0;
-    for (int k = 0; k < NPP; k++) {
+    u32 done = 0; *left = 0; int check = budget == 0, firstleft = 0;
+    for (int t = 0; t < PIC_NORD; t++) {            /* in the order of order.txt: the ones seen most first */
+        int k = (int)(pic_ord[t] >> 16), i = (int)(pic_ord[t] & 0xffff), l0 = *left;
         if (!pps[k].on) continue;
-        for (int i = 0; i < pps[k].count; i++) {
-            if (pbad[k][i]) continue;
-            if (pok[k][i] && !check) { done++; continue; }
-            if (!check && budget <= 0) { (*left)++; continue; }
+        do {
+            if (pbad[k][i]) break;
+            if (pok[k][i] && !check) { done++; break; }
+            if (!check && budget <= 0) { (*left)++; break; }
             int st = picstate(k, i);
             pok[k][i] = st == 1;
-            if (st == 1) { done++; continue; }
-            if (st < 0) { pbad[k][i] = 1; continue; }
-            if (budget <= 0) { (*left)++; continue; }
+            if (st == 1) { done++; break; }
+            if (st < 0) { pbad[k][i] = 1; break; }
+            if (budget <= 0) { (*left)++; break; }
             budget--;
             int r = picset(k, i);
             if (r == 0) { done++; pok[k][i] = 1; } else pbad[k][i] = 1;
-        }
+        } while (0);
+        if (t < PIC_NFIRST && *left != l0) firstleft++;
     }
+    picfirstin = !firstleft;
     return done;
 }
 /* --font-restore: how many of our pictures are still in place (they go at the next start of the camera) */

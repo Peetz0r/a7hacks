@@ -1371,7 +1371,7 @@ static int fontoff(void) {
  * width | height << 16 (whole tiles), 1, 0, its physical address, its resource id 0x02xxxxxx. Walks the UI's
  * [heap] and anonymous memory for such headers of our pictures, whose texture lies wholly inside one of the
  * UI's /dev/stream mappings. Returns how many textures changed, or <0 (can't). */
-static int texd;
+static int texd, texe;           /* textures brought up to date: at the end, and once the first pictures were in */
 #define MAXTEX 1024
 static u32 txpa[MAXTEX]; static int ntx;
 static u8 tpg[4096];
@@ -1556,7 +1556,7 @@ static void ftreport(char *st, char *last, int left, int done, int total, int ca
     if (!left) {
         if (pics && acc > 0) { k = scat(st, k, " a"); k = scatn(st, k, (u32)acc); }
         else if (icons) k = scat(st, k, " nopics");
-        if (pics && texd >= 0) { k = scat(st, k, " g"); k = scatn(st, k, (u32)texd); }
+        if (pics && texd >= 0) { k = scat(st, k, " g"); k = scatn(st, k, (u32)(texd + (texe > 0 ? texe : 0))); }
         if (noicons && icons) k = scat(st, k, " noicons");
         if (tookt) { k = scat(st, k, " s"); k = scatn(st, k, tookt); }
     }
@@ -1603,6 +1603,7 @@ static int font(int on, int icons) {
     picflush = 0;                     /* the label store gives up its copies of our pictures once all are in */
     int pics_state = 0;               /* 2: all our pictures are in */
     texd = -2; u32 texd2 = 0;         /* textures brought up to date (-2: not looked yet, -1: can't), next look */
+    texe = -1;                        /* -1: the first pictures aren't all in yet */
     u32 t0 = secs(); tookt = 0;       /* for the time it all takes (sS in the status) */
     sc(SYS_NICE, 19, 0, 0, 0, 0);     /* the camera comes first: unpacking and packing pictures takes a while */
     char last[80]; last[0] = 0;
@@ -1626,6 +1627,9 @@ static int font(int on, int icons) {
         int pleft = 0;
         if (pics && pics_state != 2) {         /* a batch at a time; once all are in, the label store's copies go */
             pdone = picsdo(PIC_BATCH, &pleft);
+            if (texe < 0 && picfirstin && pleft) {   /* the ones seen most are in: those already on screen too, now */
+                int r = texpass(); texe = r > 0 ? r : 0;
+            }
             if (!pleft) { pics_state = 2; picflush = 1; if (!wrote) { int l = labelflush(1); if (l >= 0) labels = l; } }
         } else if (pics) { int z; pdone = picsdo(0, &z); }
         if (wrote) {

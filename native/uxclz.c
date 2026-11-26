@@ -91,8 +91,12 @@ static int lz_block(const unsigned char *s, int n, unsigned char *dst) {
  * faster, a few per cent bigger) */
 #define LZ_QCHAIN 16
 #define LZ_MCHAIN 256
+/* its table isn't cleared for every block (that cost more than packing a small picture): an entry counts only
+ * if it carries this block's number (above the position's 12 bits) */
+static unsigned int lz_qhead[4096], lz_qprev[4096], lz_qgen;
 static int lz_block_quick(const unsigned char *s, int n, unsigned char *dst, int chain) {
-    for (int h = 0; h < 4096; h++) lz_head[h] = 0xffff;
+    if (++lz_qgen >= 1u << 20) { for (int h = 0; h < 4096; h++) lz_qhead[h] = 0; lz_qgen = 1; }
+    unsigned int g = lz_qgen << 12;
     int o = 0, i = 0, fpos = -1, nb = 8;
     dst[o++] = 0xf0;
     for (;;) {
@@ -101,9 +105,10 @@ static int lz_block_quick(const unsigned char *s, int n, unsigned char *dst, int
         int bl = 0, bd = 0;
         if (i + 2 < n) {
             int h = (s[i] << 4 ^ s[i + 1] << 2 ^ s[i + 2] * 7) & 4095;
-            int c = lz_head[h];
+            unsigned int e = lz_qhead[h];
             int lim = n - i < 64 ? n - i : 64;
-            for (int k = 0; c != 0xffff && k < chain; k++, c = lz_prev[c]) {
+            for (int k = 0; (e & ~4095u) == g && k < chain; k++, e = lz_qprev[e & 4095]) {
+                int c = (int)(e & 4095);
                 if (bl && s[c + bl] != s[i + bl]) continue;   /* can't be longer than the best so far: the same result,
                                                                  without comparing it all */
                 int m = 0;
@@ -119,7 +124,7 @@ static int lz_block_quick(const unsigned char *s, int n, unsigned char *dst, int
             step = lz_lens[L];
         } else dst[o++] = s[i];
         for (int k = i; k < i + step; k++)
-            if (k + 2 < n) { int h = (s[k] << 4 ^ s[k + 1] << 2 ^ s[k + 2] * 7) & 4095; lz_prev[k] = lz_head[h]; lz_head[h] = (unsigned short)k; }
+            if (k + 2 < n) { int h = (s[k] << 4 ^ s[k + 1] << 2 ^ s[k + 2] * 7) & 4095; lz_qprev[k] = lz_qhead[h]; lz_qhead[h] = g | (unsigned int)k; }
         i += step; nb++;
     }
     return o;

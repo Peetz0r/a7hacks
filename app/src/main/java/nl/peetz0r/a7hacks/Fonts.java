@@ -44,14 +44,21 @@ final class Fonts {
         else if (bold) t.setTypeface(null, Typeface.BOLD);
     }
 
+    /** text in Comic as styled text, for views we can't set a typeface on (titles) */
+    static CharSequence styled(Context c, CharSequence text) {
+        Typeface f = comic(c);
+        if (f == null) return text;
+        SpannableString s = new SpannableString(text);
+        s.setSpan(new FaceSpan(f), 0, s.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        return s;
+    }
+
     /** The activity's title in Comic: as styled text (the action bar keeps it), and on the title view itself
      *  where there is one (the older title bar) */
     static void title(Activity a, CharSequence text) {
         Typeface f = comic(a);
         if (f == null) { a.setTitle(text); return; }
-        SpannableString s = new SpannableString(text);
-        s.setSpan(new FaceSpan(f), 0, s.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        a.setTitle(s);
+        a.setTitle(styled(a, text));
         int[] ids = { android.R.id.title, Resources.getSystem().getIdentifier("action_bar_title", "id", "android") };
         for (int id : ids) {
             if (id == 0) continue;

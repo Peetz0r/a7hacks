@@ -14,6 +14,7 @@
  *                                                 (--text-only: the UI font only)
  *   liba7hacks.so --font-restore                  UI font: put the camera's own back
  *   liba7hacks.so --set-clock                     Linux's clock: set it from the camera's own (see below)
+ *   liba7hacks.so --version                       when this helper was built (UTC)
  *   liba7hacks.so --memory-dump path [--all]      copy the UI's own data to path (for study elsewhere;
  *                                                 --all: and the driver memory it has mapped, RAM pages only)
  *   liba7hacks.so --glyph-cache [--mark-stale | --list] [--all]
@@ -1541,10 +1542,18 @@ static int setclock(void) {
     return 0;
 }
 
+/* When this helper was built: "yyyy-mm-dd HH:MM:SS", UTC (Gradle's buildHelper passes it). --version prints it; the
+ * app runs that (as itself, no root needed) for its info dialog. */
+#ifndef A7_BUILT
+#define A7_BUILT "unknown"
+#endif
+static const char built[] = "a7hacks helper built " A7_BUILT;
+
 static int eq(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *a == *b; }
 static int run(int argc, char **argv) {
     const char *o = argc >= 2 ? argv[1] : "";
     const char *o2 = argc >= 3 ? argv[2] : "";
+    if (argc == 2 && eq(o, "--version")) { out(built); out(" UTC"); return 0; }
     if (argc == 2 && eq(o, "--exposure-patcher")) return exposure();
     if (argc == 2 && eq(o, "--label-patcher")) return label();
     if (eq(o, "--font-patcher") && (argc == 2 || (argc == 3 && eq(o2, "--text-only")))) return font(1, argc == 2);

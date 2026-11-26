@@ -2,6 +2,11 @@ plugins {
     id 'com.android.application'
 }
 
+// now, in UTC, as yyyy-MM-dd HH:mm:ss: the build times of the app and the helper
+static String utcNow() {
+    java.time.ZonedDateTime.now(java.time.ZoneOffset.UTC).format(java.time.format.DateTimeFormatter.ofPattern('yyyy-MM-dd HH:mm:ss'))
+}
+
 android {
     namespace 'nl.peetz0r.a7hacks'
     compileSdk 37
@@ -12,6 +17,12 @@ android {
         targetSdk 16
         versionCode 1
         versionName '1.0'
+        // when the app was built, in UTC (yyyy-MM-dd HH:mm:ss); the info dialog shows it in local time
+        buildConfigField 'String', 'BUILT', '"' + utcNow() + '"'
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     compileOptions {
@@ -68,6 +79,10 @@ def buildHelper = tasks.register('buildHelper', Exec) {
     doFirst {
         out.parentFile.mkdirs()
         executable = localClang ?: ndkClang()
+        // its build time (UTC), set here and not with the other arguments, so that it doesn't count as an input:
+        // the helper is only rebuilt (and gets a new time) when native/ changes. No shell in between: the
+        // quotes reach clang, which makes the macro a string literal.
+        args '-DA7_BUILT="' + utcNow() + '"'
         logger.lifecycle("liba7hacks.so with $executable")
     }
 }

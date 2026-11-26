@@ -7,7 +7,7 @@ import android.os.Handler;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
-import android.widget.Button;
+import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -84,13 +84,8 @@ public class MainActivity extends Activity {
         pp.setMargins(0, 0, 24, 0);
         bottom.addView(progress, pp);
         showProgress(null);
-        Button restart = new Button(this);
-        restart.setText("Restart");
-        restart.setTextSize(16.5f);
-        Fonts.comic(restart, false);
-        // the button's own height and vertical padding: squeezed below them, its background image (a nine-patch)
-        // gets drawn with its edges through the middle
-        restart.setPadding(42, restart.getPaddingTop(), 42, restart.getPaddingBottom());
+        // restart and info: icons from the system (public since API 1, so the camera's Android has them)
+        View restart = iconButton(android.R.drawable.ic_menu_rotate, "Restart");
         restart.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 new Thread() {
@@ -98,8 +93,12 @@ public class MainActivity extends Activity {
                 }.start();
             }
         });
-        bottom.addView(restart, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT));
+        bottom.addView(restart);
+        View info = iconButton(android.R.drawable.ic_menu_info_details, "Info");
+        info.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { About.show(MainActivity.this); }
+        });
+        bottom.addView(info);
         root.addView(bottom);
 
         setContentView(root);
@@ -107,6 +106,16 @@ public class MainActivity extends Activity {
         Intent i = new Intent(this, StartService.class);
         i.putExtra("event", "manual");
         startService(i);
+    }
+
+    /** A Holo button with a system icon. Narrow at the sides; the vertical padding stays the button's own: squeezed
+     *  below it, its background image (a nine-patch) gets drawn with its edges through the middle. */
+    private View iconButton(int icon, String description) {
+        ImageButton b = new ImageButton(this);
+        b.setImageResource(icon);
+        b.setContentDescription(description);
+        b.setPadding(24, b.getPaddingTop(), 24, b.getPaddingBottom());
+        return b;
     }
 
     @Override

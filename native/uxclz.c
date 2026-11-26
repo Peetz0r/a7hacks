@@ -65,6 +65,9 @@ static int lz_block(const unsigned char *s, int n, unsigned char *dst) {
                 unsigned int v = 17 + lz_cost[i + lz_lens[L]];
                 if (v < best || (v == best && lz_lens[L] > bl)) { best = v; bl = lz_lens[L]; bd = d; }
             }
+            if (m == lim) break;     /* as long as a match can be here: one further back would cost the same, and
+                                        the nearer one is kept on equal cost, so the result is the same (much faster
+                                        on the flat, transparent parts) */
         }
         lz_cost[i] = best; lz_len[i] = (unsigned short)bl; lz_dist[i] = (unsigned short)bd;
     }

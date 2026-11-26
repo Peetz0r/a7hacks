@@ -19,8 +19,8 @@ import java.util.Map;
 import java.util.TreeMap;
 
 public class MainActivity extends Activity {
-    private static final int HIGHLIGHT = 0xFF33B5E5;   // current lens: Holo blue (android.R.color.holo_blue_light)
-    private static final int UNKNOWN = 0xFFFF4444;     // current focal length has no entry: Holo red (holo_red_light)
+    private static final int HIGHLIGHT = 0xFF247FA0;   // current lens: Holo blue (holo_blue_light) at 70% on black, between full and a focused button (40%)
+    private static final int UNKNOWN = 0xFFB33030;     // current focal length has no entry: Holo red (holo_red_light) at 70% on black, likewise
     private static final int GAP = 24;                 // between the focal length and the lens name (px)
 
     private TableLayout lensTable;

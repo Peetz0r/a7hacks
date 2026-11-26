@@ -27,6 +27,11 @@ import java.util.TreeMap;
  *   icons = on          # lettering inside the icons and the camera's pictures (AWB, MF, ISO, focal lengths,
  *                       # page numbers, ...) in Comic Relief, with font = on; changing either takes effect at
  *                       # the next start of the camera
+ *
+ * and one that isn't on or off:
+ *
+ *   timezone = Europe/Amsterdam   # IANA time zone name: the camera's summer time switch is kept as its rules
+ *                                 # say (SummerTime.java); without it, the switch is left alone
  */
 public final class LensProfiles {
     public static final class Profile {

@@ -22,10 +22,13 @@ public class StartService extends Service {
     static volatile long lastLabelTry = 0;
     static volatile long lastFontTry = 0;
     static volatile long lastClockTry = 0;
+    static volatile long lastSummerTry = 0;
     /** From A7HACKS.INI [config] font: true = Comic Relief, false = the camera's own; null until A7HACKS.INI is read. */
     static volatile Boolean fontWanted = null;
     /** From A7HACKS.INI [config] icons: false = keep the icons' own lettering. */
     static volatile boolean iconsWanted = true;
+    /** From A7HACKS.INI [config] timezone: an IANA time zone name for the summer time switch; null: leave it. */
+    static volatile String timezoneWanted = null;
     static volatile boolean restartRequested = false;
     /** Lens profiles from A7HACKS.INI, read once (again after Restart); null until read. */
     static volatile TreeMap<Integer, LensProfiles.Profile> profiles = null;
@@ -105,6 +108,7 @@ public class StartService extends Service {
         lastLabelTry = 0;
         lastFontTry = 0;
         lastClockTry = 0;
+        lastSummerTry = 0;
         restartRequested = true;
         synchronized (StartService.class) { lastStart = 0; }
     }
@@ -127,6 +131,7 @@ public class StartService extends Service {
         java.util.Map<String, String> options = LensProfiles.loadOptions(files);
         fontWanted = onOff(options, "font");
         iconsWanted = onOff(options, "icons");
+        timezoneWanted = options.get("timezone");
         profiles = p;
         File used = null;
         for (File f : files) if (f.isFile()) { used = f; break; }
@@ -169,6 +174,9 @@ public class StartService extends Service {
         boolean clockLogged = false;
         String irisLogged = null;
         String clockSeen = null;
+        Integer clockOffset = null;            // the camera's time zone plus summer time (minutes), once known
+        final SummerTime summer = new SummerTime(ctx);
+        boolean summerConfigured = false;
         final String clockOld = Starter.clockStatus();   // an answer from before (a restart): not news
         AppLog.add("started");
         while (true) {
@@ -187,6 +195,7 @@ public class StartService extends Service {
                     accentLogged = false;
                     clockLogged = false;
                     irisLogged = null;
+                    summerConfigured = false;
                 }
                 // The SD card is the way out: without one, nothing of ours runs as root. Should the helper ever make
                 // the camera restart, over and over (the app starts with it), take the card out, uninstall the
@@ -198,6 +207,10 @@ public class StartService extends Service {
                     }
                     try { Thread.sleep(1000); } catch (InterruptedException e) { return; }
                     continue;
+                }
+                if (!summerConfigured) {
+                    summer.configure(timezoneWanted);
+                    summerConfigured = true;
                 }
                 // 0. the clock: Linux's clock from the camera's own, now and then every minute (it stands still
                 //    while the camera sleeps); the answer comes a moment later
@@ -216,7 +229,11 @@ public class StartService extends Service {
                     String zone = null;
                     for (String x : w)
                         if (x.length() > 1 && (x.charAt(0) == '+' || x.charAt(0) == '-')) {
-                            try { zone = AppLog.setZone(Integer.parseInt(x.substring(x.charAt(0) == '+' ? 1 : 0))); }
+                            try {
+                                int off = Integer.parseInt(x.substring(x.charAt(0) == '+' ? 1 : 0));
+                                zone = AppLog.setZone(off);
+                                clockOffset = ck.startsWith("clock set") || ck.startsWith("clock same") ? off : null;
+                            }
                             catch (NumberFormatException e) { /* not the offset */ }
                         }
                     if (ck.equals(clockOld)) { /* only the zone */ }
@@ -393,6 +410,14 @@ public class StartService extends Service {
                 }
                 // 2. the lens info
                 writer.tick(SystemClock.elapsedRealtime());
+                // 3. summer time (A7HACKS.INI timezone): once a minute, once Linux's clock is the camera's
+                if (clockOffset != null && SystemClock.elapsedRealtime() - lastSummerTry > 60000) {
+                    lastSummerTry = SystemClock.elapsedRealtime();
+                    if (summer.tick(clockOffset)) {            // read the clock again, and look again in 5 s
+                        lastClockTry = 0;
+                        lastSummerTry = SystemClock.elapsedRealtime() - 55000;
+                    }
+                }
                 if (writer.isStopped() && !loggedStopped) {
                     jlog(ctx, "lens writer stopped");
                     loggedStopped = true;

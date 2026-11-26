@@ -26,7 +26,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** The info dialog: when the app and the helper were built (stored in UTC, shown in the camera's local time, the
- *  zone AppLog.setZone took from the camera's clock), and where the project lives. */
+ *  zone AppLog.setZone took from the camera's clock), the tzdata the summer time switch uses, and where the
+ *  project lives. */
 final class About {
     private static final int LINK = 0xFF33B5E5;     // Holo blue (android.R.color.holo_blue_light), as a link
     private static final Pattern VERSION = Pattern.compile("built (\\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d:\\d\\d) UTC");
@@ -54,6 +55,9 @@ final class About {
                 }
             }.start();
         }
+
+        String tz = SummerTime.inUse;      // the summer time switch's tzdata, once read
+        row(table, "tzdata", tz != null ? tz : "...");
 
         TextView link = new TextView(a);    // not clickable (no browser on the camera), but it looks like a link
         link.setText("peetz0r.nl/a7hacks");

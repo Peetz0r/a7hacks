@@ -5,6 +5,9 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
 
     <application android:persistent="true" android:label="@string/app_name" android:icon="@drawable/ic_launcher">
+        <!-- Sony's TimeUtil (firmware), for the summer time switch; reached by reflection -->
+        <uses-library android:name="com.sony.scalar.sysutil.TimeUtil" android:required="false" />
+
         <activity android:name="nl.peetz0r.a7hacks.MainActivity"
                   android:label="@string/app_name"
                   android:theme="@style/A7hacks"

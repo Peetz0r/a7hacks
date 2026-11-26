@@ -1374,7 +1374,7 @@ static u8 tpg[4096];
 static int texpaint(u32 res, u32 tpa, u32 dim) {
     int ki = picfind(0x1a000000u | (res & 0xffffff));
     if (ki < 0) return 0;
-    u32 raw = pps[ki >> 16].raw[ki & 0xffff] & 0x3fffffffu;
+    u32 raw = pps[ki >> 16].raw[ki & 0xffff] & 0x1fffffffu;
     int in = 0;
     for (int s_ = 0; s_ < nst; s_++) if (tpa >= stpa[s_] && stlen[s_] >= raw && tpa - stpa[s_] <= stlen[s_] - raw) in = 1;
     if (!in) return 0;

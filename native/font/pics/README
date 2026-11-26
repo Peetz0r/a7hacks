@@ -46,7 +46,10 @@ Scripts
   hue.py      the accent colour: Sony's orange turned HUE degrees (env HUE, default 75: green), as a table
               RGB444 -> RGB444 for the warm colours, applied to the pictures that use the orange accent
               (not photos, not the red ones, not the gold auto-mode icons); the camera applies the same
-              table (pic_hue in picpatch.h) to pictures marked with the top bit of _raw. HUE=0: no change
+              table (pic_hue in picpatch.h) to pictures marked with the top bit of _raw. HUE=0: no change.
+              Two exceptions get tables of their own: the warnings (REDS: red, pic_red, bit 30) and the
+              level's pictures (blue(): BLUE degrees, default 195, pic_blue, bit 29), so that tilted doesn't look
+              like Sony's green "level"
   qa.py       before/after sheets for checking by eye (buildc: in colour; about half the pictures are
               coloured, the orange 'selected' ones, and render.py keeps their colours)
 

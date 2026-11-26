@@ -39,9 +39,22 @@ REDS = {                                       # resource ids (image_cmn_43 0x20
 }
 REDLUT = _table(lambda h: h if h * 360 >= WARM[0] else max(0.0, h - RED / 360))    # 340..360: red already, kept
 
-def apply(p, red=False):
-    """the picture (uint16 RGBA4444) with the table applied (alpha kept); red: the warning table instead"""
-    return (((REDLUT if red else LUT)[p >> 4].astype(np.uint32) << 4) | (p & 15)).astype(np.uint16)
+# The level's marks: with the accent green, "tilted" would look like Sony's green "level"; so blue instead, the
+# warm hues turned BLUE degrees. The level is drawn from pictures, one per angle: in image_cmn_43 (0x205....) the
+# pitch marks (84x36, and 36x84 upright), the middle ones, alone or with the lines (310x80), and the roll line
+# with its marks, with or without the brackets (276x106, and 106x276 for the camera held upright); all the
+# pictures of those sizes there are level pictures. And a single mark (it has a white twin, 0x205c19c).
+BLUE = int(os.environ.get('BLUE', '195'))
+BLUES = {0x205c19b}
+LEVEL_SIZES = {(84, 36), (36, 84), (310, 80), (276, 106), (106, 276)}
+def blue(res, w, h):
+    return res in BLUES or (res >> 16 == 0x205 and (w, h) in LEVEL_SIZES)
+BLUELUT = _table(lambda h: (h + BLUE / 360) % 1)
+
+def apply(p, red=False, blue=False):
+    """the picture (uint16 RGBA4444) with the table applied (alpha kept); red: the warning table instead; blue:
+    the level's"""
+    return (((REDLUT if red else BLUELUT if blue else LUT)[p >> 4].astype(np.uint32) << 4) | (p & 15)).astype(np.uint16)
 
 def hsv(p):
     a = p & 15; R = ((p >> 12) & 15).astype(float); G = ((p >> 8) & 15).astype(float); B = ((p >> 4) & 15).astype(float)

@@ -166,6 +166,7 @@ public class StartService extends Service {
         boolean fontStopped = false;
         String picturesLogged = null;          // the "pN" last logged
         boolean accentLogged = false;
+        boolean clockLogged = false;
         String clockSeen = null;
         final String clockOld = Starter.clockStatus();   // an answer from before (a restart): not news
         AppLog.add("started");
@@ -183,6 +184,7 @@ public class StartService extends Service {
                     labelKind = null;
                     picturesLogged = null;
                     accentLogged = false;
+                    clockLogged = false;
                 }
                 // The SD card is the way out: without one, nothing of ours runs as root. Should the helper ever make
                 // the camera restart, over and over (the app starts with it), take the card out, uninstall the
@@ -323,6 +325,9 @@ public class StartService extends Service {
                             picturesLogged = w;
                             AppLog.add("pictures: " + w.substring(1) + " of the camera's pictures (focal lengths, page"
                                 + " numbers, AWB, ISO, ...) now have their lettering in Comic Relief and the accent colour in green" + took);
+                        } else if (w.length() > 1 && w.charAt(0) == 'h' && Character.isDigit(w.charAt(1)) && !clockLogged) {
+                            clockLogged = true;
+                            AppLog.add("playback: the time in 24 hours, with the date as set");
                         } else if (w.length() > 1 && w.charAt(0) == 'a' && Character.isDigit(w.charAt(1)) && !accentLogged) {
                             accentLogged = true;
                             AppLog.add("accent colour: the text the camera draws in orange is now green");

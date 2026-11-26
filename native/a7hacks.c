@@ -76,7 +76,8 @@
  * color_cmn.uxc, style_cmn.uxc). --text-only leaves the icons, pictures and colours alone, and so does the patcher for a file
  * that isn't exactly the one this was made for (status gets "noicons" / "nopics"). Status (on N [cM | nocache]
  * [tK | nolabels] [pP[/T] | nopics] [aA] [noicons] | partial N/M [pP/T] | off [pics] | badfile | error ...; M = cached
- * characters marked; P/T: pictures done of how many, while they are still being done; fF, sS: seconds from the
+ * characters marked; P/T: pictures done of how many, while they are still being done; hH: the time in 24 hours
+ * (pics.c, clock24) in H places; fF, sS: seconds from the
  * patcher's start until the font, and the pictures, were all in) goes to
  * /android/dev/a7hacks.ft. A stop (SIGTERM, the app's Restart) is held off while
  * the patcher writes, so nothing is left half written.
@@ -1539,6 +1540,7 @@ static u32 secs(void) {
 }
 static u32 tookf, tookp;              /* seconds the patcher took to get the font, the pictures in (0: not yet) */
 
+static int h24n;                      /* the 24 hour time: how many of its patches are ours (hN in the status) */
 static void ftreport(char *st, char *last, int left, int done, int total, int cache, int labels, int pics,
                      u32 pdone, int pleft, int acc, int icons, int noicons) {
     int k = 0;
@@ -1555,6 +1557,7 @@ static void ftreport(char *st, char *last, int left, int done, int total, int ca
     }
     if (!left) {
         if (pics && acc > 0) { k = scat(st, k, " a"); k = scatn(st, k, (u32)acc); }
+        if (pics && h24n > 0) { k = scat(st, k, " h"); k = scatn(st, k, (u32)h24n); }
         else if (icons) k = scat(st, k, " nopics");
         if (pics && texd >= 0) { k = scat(st, k, " g"); k = scatn(st, k, (u32)(texd + (texe > 0 ? texe : 0))); }
         if (noicons && icons) k = scat(st, k, " noicons");
@@ -1571,7 +1574,7 @@ static int font(int on, int icons) {
         ftstatus("restoring");
         mypid = sc(SYS_GETPID, 0, 0, 0, 0, 0);
         fd = sc(SYS_OPEN, (long)"/dev/mem", 2, 0, 0, 0);
-        if (fd >= 0) colours(0);            /* the text accent colour back to Sony's */
+        if (fd >= 0) { colours(0); clock24(0); }   /* the text accent colour and the 12 hour time back to Sony's */
         int left = fontoff();
         if (left == 0) {                 /* and the UI's cached Comic glyphs go stale */
             fd = sc(SYS_OPEN, (long)"/dev/mem", 2, 0, 0, 0);
@@ -1627,6 +1630,7 @@ static int font(int on, int icons) {
             }
         }
         int acc = pics ? colours(1) : 0;      /* the text accent colour too */
+        h24n = pics ? clock24(1) : 0;         /* and the time in 24 hours */
         int pleft = 0;
         if (pics && pics_state != 2) {         /* a batch at a time; once all are in, the label store's copies go */
             pdone = picsdo(PIC_BATCH, &pleft);

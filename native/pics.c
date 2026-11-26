@@ -290,4 +290,84 @@ static int colours(int on) {
     for (unsigned c = 0; c < sizeof cts / sizeof cts[0]; c++) { int r = colours1(&cts[c], on); if (r < 0) bad = r; else n += r; }
     return n ? n : bad;
 }
-static void picsreset(void) { for (int k = 0; k < NPP; k++) { pps[k].map = 0; pps[k].on = 0; } picflush = 0; if (sfd >= 0) sc(SYS_CLOSE, sfd, 0, 0, 0, 0); sfd = -2; for (unsigned c = 0; c < sizeof cts / sizeof cts[0]; c++) cts[c].map = 0; }
+/* The time in 24 hours (ISO 8601 with the Y-M-D date). Sony shows the time in 24 hours only with the date format
+ * D-M-Y, in 12 (AM/PM) with the others; each place that shows a time decides that for itself:
+ *  - playback, the line under the picture (viewUnified2.so, the ACT_ widget after ACT_IconNdFilterAct: time
+ *    as "${v1:2}:${v2:02}${v3}", v3 AM/PM or, for D-M-Y, empty with the hour as it is): "cmp r3, #3" (the
+ *    date format) becomes "cmp r3, r3", so always the D-M-Y way, Thumb at 0x2e489a;
+ *  - ViewGpsInfo in viewUnified8.so (a picture's date, and its time as hour, minutes and AM/PM): after giving the date its order (setFormatType) it takes the 24 hour way only for format 3:
+ *    "cmp r5, #3 ... beq" becomes "movs r5, #3 ... b" (r5 is used further on as for D-M-Y), Thumb at 0x26142
+ *    and 0x26148;
+ *  - ACT_IconLabelPbDatacode in viewUnified2.so (a time with seconds): a table in the read-only data, one byte
+ *    per date format, 1 = 24 hours (Sony's 0, 0, 0, 1): Y-M-D's becomes 1.
+ * Into the camera's in-memory copy of each library, like the colours (its page kept there while the font
+ * patcher runs), only if the whole page is exactly the one we know (its hash with Sony's bytes in our places)
+ * and each place holds Sony's bytes or ours. Written in order (backwards when putting Sony's back), so a half
+ * done change is still Sony's way; code is followed by an instruction cache flush. on: ours, off: Sony's.
+ * Returns how many places are ours, or <0. */
+static struct h24f { const char *path; u32 size, page, hash; const u8 *map; } h24fs[] = {
+    {"/usr/lib/viewUnified8.so", 232804u, 0x26000u, 0xa6f67cb8u, 0},
+    {"/usr/lib/viewUnified2.so", 5317568u, 0x40a000u, 0x6a85a2efu, 0},
+    {"/usr/lib/viewUnified2.so", 5317568u, 0x2e4000u, 0xa6ae5667u, 0},
+};
+static const struct h24p { int f; u32 off; u8 n, old[2], nw[2]; } h24ps[] = {
+    {0, 0x26142u, 2, {0x03, 0x2d}, {0x03, 0x25}},     /* cmp r5, #3  ->  movs r5, #3 */
+    {0, 0x26148u, 2, {0x2d, 0xd0}, {0x2d, 0xe0}},     /* beq (24 hours)  ->  b */
+    {1, 0x40a314u, 1, {0x00}, {0x01}},                /* Y-M-D: 12 hours  ->  24 */
+    {2, 0x2e489au, 2, {0x03, 0x2b}, {0x9b, 0x42}},    /* cmp r3, #3  ->  cmp r3, r3 */
+};
+#define NH24F ((int)(sizeof h24fs / sizeof h24fs[0]))
+#define NH24P ((int)(sizeof h24ps / sizeof h24ps[0]))
+static int clock24(int on) {
+    static u8 b[4096];
+    int ok[NH24F];
+    for (int f = 0; f < NH24F; f++) {
+        struct h24f *F = &h24fs[f]; ok[f] = 0;
+        if (!F->map) {
+            int h = sc(SYS_OPEN, (long)F->path, 0, 0, 0, 0);
+            if (h < 0) continue;
+            unsigned long long end = 0;
+            if (sc(SYS_LLSEEK, h, 0, 0, (long)&end, 2) < 0 || end != F->size) { sc(SYS_CLOSE, h, 0, 0, 0, 0); continue; }
+            long a = sc6(SYS_MMAP2, 0, 4096, 1 /* PROT_READ */, 1 /* MAP_SHARED */, h, (long)(F->page >> 12));
+            sc(SYS_CLOSE, h, 0, 0, 0, 0);
+            if ((unsigned long)a >= (unsigned long)-4095L) continue;
+            sc(SYS_MLOCK, a, 4096, 0, 0, 0);
+            F->map = (const u8 *)a;
+        }
+        /* the page as Sony made it, with ours put back: is it the one we know? */
+        for (u32 i = 0; i < 4096; i++) b[i] = F->map[i];
+        int good = 1;
+        for (int k = 0; k < NH24P; k++) {
+            const struct h24p *P = &h24ps[k];
+            if (P->f != f) continue;
+            const u8 *q = F->map + (P->off - F->page);
+            int isold = 1, isnew = 1;
+            for (int j = 0; j < P->n; j++) { if (q[j] != P->old[j]) isold = 0; if (q[j] != P->nw[j]) isnew = 0; }
+            if (!isold && !isnew) good = 0;
+            for (int j = 0; j < P->n; j++) b[P->off - F->page + j] = P->old[j];
+        }
+        ok[f] = good && pfnv(b, 4096) == F->hash;
+    }
+    int n = 0, bad = 0;
+    for (int x = 0; x < NH24P; x++) {
+        int k = on ? x : NH24P - 1 - x;              /* in order; Sony's back the other way round */
+        const struct h24p *P = &h24ps[k];
+        struct h24f *F = &h24fs[P->f];
+        if (!ok[P->f]) { bad = -2; continue; }        /* not the library we know: leave it */
+        const u8 *want = on ? P->nw : P->old;
+        u8 *q = (u8 *)F->map + (P->off - F->page);
+        int same = 1;
+        for (int j = 0; j < P->n; j++) if (q[j] != want[j]) same = 0;
+        if (!same) {
+            hold(1);
+            int r = vrw(mypid, (u32)(unsigned long)q, (u8 *)want, P->n, 1);
+            sc(0xf0002 /* ARM cacheflush */, (long)q, (long)(q + P->n), 0, 0, 0);
+            hold(0);
+            if (r <= 0) { bad = -3; continue; }
+        }
+        n += on;
+    }
+    if (!on) for (int f = 0; f < NH24F; f++) if (h24fs[f].map) { sc(SYS_MUNMAP, (long)h24fs[f].map, 4096, 0, 0, 0); h24fs[f].map = 0; }
+    return n ? n : bad;
+}
+static void picsreset(void) { for (int k = 0; k < NPP; k++) { pps[k].map = 0; pps[k].on = 0; } picflush = 0; if (sfd >= 0) sc(SYS_CLOSE, sfd, 0, 0, 0, 0); sfd = -2; for (unsigned c = 0; c < sizeof cts / sizeof cts[0]; c++) cts[c].map = 0; for (int c = 0; c < NH24F; c++) h24fs[c].map = 0; }

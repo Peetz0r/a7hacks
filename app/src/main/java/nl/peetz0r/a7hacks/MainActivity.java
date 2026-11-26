@@ -102,7 +102,9 @@ public class MainActivity extends Activity {
         root.addView(bottom);
 
         setContentView(root);
-        Fonts.title(this, getTitle());                     // the title bar in Comic too
+        // the title in Comic too; the theme leaves it out of the action bar (see styles.xml), so it's switched on here
+        if (getActionBar() != null) getActionBar().setDisplayShowTitleEnabled(true);
+        Fonts.title(this, getTitle());
         Intent i = new Intent(this, StartService.class);
         i.putExtra("event", "manual");
         startService(i);

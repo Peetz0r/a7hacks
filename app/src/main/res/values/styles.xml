@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Holo, with the window Android shows while the app starts made to match the app's first frame. That window is
+         drawn from the theme alone: a title there would be in the system font (so the action bar shows none until
+         MainActivity turns it on, in Comic), and the camera (no touch mode) gives its icon the focus, whose
+         translucent background its display shows patchy (so the action bar's items get none). -->
+    <style name="A7hacks" parent="@android:style/Theme.Holo">
+        <item name="android:actionBarStyle">@style/A7hacks.ActionBar</item>
+        <item name="android:actionBarItemBackground">@android:color/transparent</item>
+    </style>
+
+    <style name="A7hacks.ActionBar" parent="@android:style/Widget.Holo.ActionBar">
+        <item name="android:displayOptions">showHome</item>
+    </style>
+</resources>

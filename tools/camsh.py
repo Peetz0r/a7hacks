@@ -82,7 +82,10 @@ def serve():
                             res = {'error': 'unknown command'}
                     except Exception as e:
                         res = {'error': repr(e)}
-                    conn.sendall((json.dumps(res) + '\n').encode())
+                    try:
+                        conn.sendall((json.dumps(res) + '\n').encode())
+                    except OSError:
+                        pass                                 # the client left before the answer: keep serving
         finally:
             cam.setTerminalEnable(False)
             if os.path.lexists(SOCK): os.remove(SOCK)

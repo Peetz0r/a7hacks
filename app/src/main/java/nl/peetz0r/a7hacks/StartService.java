@@ -309,12 +309,18 @@ public class StartService extends Service {
                 // the pictures (and the accent colour) once they're all in: "pN" (while they're still being
                 // done it reads "pN/T", which the screen shows as progress)
                 if (ft != null && ft.startsWith("on ")) {
+                    String took = "";              // "sS": how long the patcher took to get it all in
+                    for (String w : ft.split(" "))
+                        if (w.length() > 1 && w.charAt(0) == 's' && Character.isDigit(w.charAt(1))) {
+                            int n = Integer.parseInt(w.substring(1));
+                            took = " (in " + (n >= 60 ? n / 60 + " min " : "") + n % 60 + " s)";
+                        }
                     for (String w : ft.split(" ")) {
                         if (w.length() > 1 && w.charAt(0) == 'p' && Character.isDigit(w.charAt(1)) && w.indexOf('/') < 0
                                 && !w.equals(picturesLogged)) {
                             picturesLogged = w;
                             AppLog.add("pictures: " + w.substring(1) + " of the camera's pictures (focal lengths, page"
-                                + " numbers, AWB, ISO, ...) now have their lettering in Comic Relief and the accent colour in green");
+                                + " numbers, AWB, ISO, ...) now have their lettering in Comic Relief and the accent colour in green" + took);
                         } else if (w.length() > 1 && w.charAt(0) == 'a' && Character.isDigit(w.charAt(1)) && !accentLogged) {
                             accentLogged = true;
                             AppLog.add("accent colour: the text the camera draws in orange is now green");

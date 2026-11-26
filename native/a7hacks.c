@@ -752,7 +752,7 @@ static int fset1(int f, int i) {
     return frange(f, i) == 1 ? 0 : -1;
 }
 
-#define PIC_BATCH 25                    /* pictures per pass of the font patcher's loop (passes 10 ms apart while there are more) */
+#define PIC_BATCH 100                   /* pictures per pass of the font patcher's loop (passes 10 ms apart while there are more) */
 #include "pics.c"
 
 /* The UI reads the fonts through buffered file reads (1 KB at a time, at 1 KB boundaries). A character that

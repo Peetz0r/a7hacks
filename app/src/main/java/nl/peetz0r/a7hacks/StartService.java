@@ -157,7 +157,6 @@ public class StartService extends Service {
             public void log(String line) { AppLog.add(line); }
         };
         LensWriter writer = new LensWriter(setting, lookup, tool, log);
-        long started = SystemClock.elapsedRealtime();
         boolean loggedWaitSd = false, loggedStopped = false, exposureStopped = false;
         String exposureKind = null, labelKind = null, fontKind = null;
         boolean fontStopped = false;
@@ -172,7 +171,6 @@ public class StartService extends Service {
                     restartRequested = false;
                     profiles = null;
                     writer = new LensWriter(setting, lookup, tool, log);
-                    started = SystemClock.elapsedRealtime();
                     loggedStopped = false;
                     exposureStopped = false;
                     exposureKind = null;
@@ -181,6 +179,17 @@ public class StartService extends Service {
                     labelKind = null;
                     picturesLogged = null;
                     accentLogged = false;
+                }
+                // The SD card is the way out: without one, nothing of ours runs as root. Should the helper ever make
+                // the camera restart, over and over (the app starts with it), take the card out, uninstall the
+                // app, and the card can go back in. So A7HACKS.INI (the card) first; all the rest waits for it.
+                if (profiles == null && !loadProfiles()) {
+                    if (!loggedWaitSd) {
+                        AppLog.add("waiting for the SD card: nothing starts without one");
+                        loggedWaitSd = true;
+                    }
+                    try { Thread.sleep(1000); } catch (InterruptedException e) { return; }
+                    continue;
                 }
                 // 0. the clock: Linux's clock from the camera's own, now and then every minute (it stands still
                 //    while the camera sleeps); the answer comes a moment later
@@ -276,7 +285,7 @@ public class StartService extends Service {
                         labelKind = kind;
                     }
                 }
-                // 1d. UI font, once A7HACKS.INI has been read (it can switch it off)
+                // 1d. UI font (A7HACKS.INI can switch it off)
                 Boolean fw = fontWanted;
                 String ft = Starter.fontStatus();
                 if (fw != null && !fontStopped) {
@@ -360,18 +369,11 @@ public class StartService extends Service {
                         fontKind = kind;
                     }
                 }
-                // 2. A7HACKS.INI, once the card is there
-                if (profiles == null && !loadProfiles() && !loggedWaitSd) {
-                    AppLog.add("waiting for the SD card (for A7HACKS.INI)");
-                    loggedWaitSd = true;
-                }
-                // 3. the lens info; without a card, start after 20 s with the focal length only
-                if (profiles != null || SystemClock.elapsedRealtime() - started > 20000) {
-                    writer.tick(SystemClock.elapsedRealtime());
-                    if (writer.isStopped() && !loggedStopped) {
-                        jlog(ctx, "lens writer stopped");
-                        loggedStopped = true;
-                    }
+                // 2. the lens info
+                writer.tick(SystemClock.elapsedRealtime());
+                if (writer.isStopped() && !loggedStopped) {
+                    jlog(ctx, "lens writer stopped");
+                    loggedStopped = true;
                 }
             } catch (Throwable t) {
                 jlog(ctx, "supervisor error: " + t);

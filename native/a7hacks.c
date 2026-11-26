@@ -607,7 +607,7 @@ static int labfix(int pid, u32 va) {
 }
 
 static void uistatus(const char *s) { statusto(UISTATUS, UISTATUS ".t", s); }
-static int scat(char *b, int k, const char *s) { while (*s && k < 38) b[k++] = *s++; b[k] = 0; return k; }
+static int scat(char *b, int k, const char *s) { while (*s && k < 78) b[k++] = *s++; b[k] = 0; return k; }   /* status lines: up to 78 characters (buffers of 80) */
 static int scatn(char *b, int k, u32 v) {
     char d[12]; int i = 11; d[i] = 0;
     do { d[--i] = '0' + v % 10; v /= 10; } while (v && i > 0);
@@ -645,7 +645,7 @@ static int label(void) {
             if (r <= 0) { delhit(i); if (!nhits) { next = t + 1; wait = 5; } continue; }
             on++; i++;
         }
-        char st[40]; int k = 0; st[0] = 0;
+        char st[80]; int k = 0; st[0] = 0;
         if (err) k = scat(st, k, "error write");
         else if (on) { k = scat(st, k, "on "); k = scatn(st, k, (u32)on); }
         else if (procs) { k = scat(st, k, "waiting "); k = scatn(st, k, mb); }

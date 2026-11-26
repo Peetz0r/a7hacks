@@ -316,12 +316,15 @@ static struct h24f { const char *path; u32 size, page, hash; const u8 *map; } h2
     {"/usr/lib/viewUnified2.so", 5317568u, 0x2e4000u, 0xa6ae5667u, 0},
     {"/usr/lib/viewUnified2.so", 5317568u, 0x316000u, 0x95a0481du, 0},
     {"/usr/lib/viewUnified2.so", 5317568u, 0x30b000u, 0x4f4caeabu, 0},
+    {"/usr/lib/viewUnified2.so", 5317568u, 0x48c000u, 0x39165da7u, 0},
 };
-/* kind: H24 the time in 24 hours (always); IRIS_T, IRIS_S the focal length where live view says F-- (only with a
- * lens that tells no aperture: see irisfl below) */
+/* kind: H24 the time in 24 hours (always); IRIS_T, IRIS_W the focal length where live view says F-- (only with a
+ * lens that tells no aperture: see irisfl below), IRIS_W a code word written at once; IRIS_S always Sony's (it was
+ * ours: the number written into "--"; any number there is taken back) */
 #define H24 0
 #define IRIS_T 1
 #define IRIS_S 2
+#define IRIS_W 3
 static const struct h24p { int f; u32 off; u8 n, kind, old[4], nw[4]; } h24ps[] = {
     {0, 0x26142u, 2, H24, {0x03, 0x2d}, {0x03, 0x25}},     /* cmp r5, #3  ->  movs r5, #3 */
     {0, 0x26148u, 2, H24, {0x2d, 0xd0}, {0x2d, 0xe0}},     /* beq (24 hours)  ->  b */
@@ -330,8 +333,20 @@ static const struct h24p { int f; u32 off; u8 n, kind, old[4], nw[4]; } h24ps[] 
     {3, 0x316a3eu, 2, H24, {0xbb, 0x49}, {0x49, 0xe1}},    /* ldr r1, =template  ->  b 0x316cd4 (half: ldr r1, other) */
     {3, 0x316b1au, 2, H24, {0x84, 0x49}, {0xdb, 0xe0}},
     {3, 0x316c02u, 2, H24, {0x4a, 0x49}, {0x67, 0xe0}},
-    {1, 0x40a978u, 4, IRIS_S, {'-', '-', 0, 0}, {0}},      /* "--"  ->  the focal length, "135" (1..4 digits) */
+    {1, 0x40a978u, 4, IRIS_S, {'-', '-', 0, 0}, {0}},      /* "--" (was: the focal length, "135", 1..4 digits) */
+    /* our code (in the zeros after the library's code): mm = Bkup_Read(0x010713ca), into the aperture's now unused
+     * slot, and on into Sony's own "%d" with it (r6 = 0, as for "--"); if the read fails, the label as it was */
+    {5, 0x48cfe0u, 4, IRIS_T, {0}, {0x06, 0x48, 0x07, 0xf1}},  /* ldr r0, =0x010713ca; add.w r1, r7, #0x5c */
+    {5, 0x48cfe4u, 4, IRIS_T, {0}, {0x5c, 0x01, 0x5d, 0xf4}},
+    {5, 0x48cfe8u, 4, IRIS_T, {0}, {0xc2, 0xef, 0x08, 0xb1}},  /* blx Bkup_Read (0xeaf6c); cbz r0, 1f */
+    {5, 0x48cfecu, 4, IRIS_T, {0}, {0x7e, 0xf6, 0x59, 0xbb}},  /* b.w 0x30b6a2 (Sony's end of "--") */
+    {5, 0x48cff0u, 4, IRIS_T, {0}, {0x00, 0x26, 0xb7, 0xf8}},  /* 1: movs r6, #0; ldrh.w r0, [r7, #0x5c] */
+    {5, 0x48cff4u, 4, IRIS_T, {0}, {0x5c, 0x00, 0x7e, 0xf6}},  /* b.w 0x30b648 (snprintf(buf, 5, "%d", r0)) */
+    {5, 0x48cff8u, 4, IRIS_T, {0}, {0x27, 0xbb, 0x00, 0xbf}},  /* nop */
+    {5, 0x48cffcu, 4, IRIS_T, {0}, {0xca, 0x13, 0x07, 0x01}},  /* 0x010713ca: the SteadyShot focal length (mm) */
+    {4, 0x30b5c4u, 4, IRIS_W, {0xdf, 0xf5, 0x1a, 0xe8}, {0x81, 0xf1, 0x0c, 0xfd}},   /* "--": blx memcpy  ->  bl 0x48cfe0 */
     {4, 0x30b844u, 4, IRIS_T, {0xf4, 0xe7, 0x04, 0x02}, {0xf6, 0xe7, 0x04, 0x02}},   /* F${v1:2}  ->  ${v1} (one byte) */
+    {4, 0x30b754u, 2, IRIS_T, {0x02, 0xd9}, {0x02, 0xe0}},  /* its event filter: bls (events 0, 1)  ->  b (every event) */
 };
 #define NH24F ((int)(sizeof h24fs / sizeof h24fs[0]))
 #define NH24P ((int)(sizeof h24ps / sizeof h24ps[0]))
@@ -344,13 +359,14 @@ static int h24ours(const struct h24p *P, const u8 *q) {
     return 1;
 }
 /* The live view's aperture (ACT_IconIris in viewUnified2.so) with a lens that tells none (a manual one) reads
- * "F--": the label's template F${v1:2} with v1 copied from a 4 byte string "--" in the library's read-only data
- * (only that widget uses it). For such a lens, ours: the template, a word in that widget's own literal pool
- * that its setup reads, becomes ${v1} (0x1e04e7f6, the same in every language), and "--" the focal length set
- * for SteadyShot, so it reads "135" (with "mm" the label, sized for "F5.6", shrank it); with any other lens,
- * Sony's. The template is read when the widget is
- * set up (a change of screen), the string whenever the label is drawn again. irisfl: that focal length, 0 for
- * Sony's. */
+ * "F--": the label's template F${v1:2} with v1 copied (memcpy) from a 4 byte string "--". For such a lens, ours:
+ * the template, a word in that widget's own literal pool that its setup reads, becomes ${v1} (0x1e04e7f6, the
+ * same in every language), and instead of copying "--" the widget reads the focal length set for SteadyShot
+ * itself (our code above), so it reads "135" (with "mm" the label, sized for "F5.6", shrank it); with any other
+ * lens, Sony's. The widget is built anew on a change of screen and when a menu (C4) closes, and takes its values
+ * then and on its events (event id 0, 1 or 0x18000000, GetEventId at 0x30b74e; other events it ignores); for
+ * such a lens its filter lets every event through. irisfl: that focal length (the helper's own reading; it only
+ * decides ours or Sony's now), 0 for Sony's. */
 static u32 irisfl, irisin;              /* irisin: the focal length the label has been given (status iN) */
 static int clock24(int on) {
     static u8 b[4096];
@@ -383,10 +399,6 @@ static int clock24(int on) {
         ok[f] = good && pfnv(b, 4096) == F->hash;
     }
     /* what each place should hold */
-    u8 fl[4] = {0, 0, 0, 0};
-    u32 v = on ? irisfl : 0;
-    if (v >= 10000) v = 0;
-    if (v) { int d = v >= 1000 ? 4 : v >= 100 ? 3 : v >= 10 ? 2 : 1; for (int j = d - 1; j >= 0; j--) { fl[j] = (u8)('0' + v % 10); v /= 10; } }
     int n = 0, bad = 0;
     /* Sony's back first, last place first (the template before its string); then ours, in order (the string
      * before the template), so a half done change is still a sensible text */
@@ -395,30 +407,34 @@ static int clock24(int on) {
             int k = pass ? x : NH24P - 1 - x;
             const struct h24p *P = &h24ps[k];
             struct h24f *F = &h24fs[P->f];
-            int mine = P->kind == H24 ? on : (on && irisfl > 0 && irisfl < 10000);
+            int mine = P->kind == H24 ? on : P->kind == IRIS_S ? 0 : (on && irisfl > 0 && irisfl < 10000);
             if (mine != pass) continue;
             if (!ok[P->f]) { bad = -2; continue; }        /* not the library we know: leave it */
-            const u8 *want = !mine ? P->old : P->kind == IRIS_S ? fl : P->nw;
+            const u8 *want = !mine ? P->old : P->nw;
             u8 *q = (u8 *)F->map + (P->off - F->page);
             int same = 1;
             for (int j = 0; j < P->n; j++) if (q[j] != want[j]) same = 0;
             if (!same) {
                 int r = 1;
                 hold(1);
-                for (int j = 0; j < P->n && r > 0; j++) {      /* a byte at a time: low first, Sony's back high first */
+                if (P->kind == IRIS_W) r = vrw(mypid, (u32)(unsigned long)q, (u8 *)want, P->n, 1);   /* one aligned word */
+                else for (int j = 0; j < P->n && r > 0; j++) {  /* a byte at a time: low first, Sony's back high first */
                     int bb = mine ? j : P->n - 1 - j;
                     if (q[bb] != want[bb]) r = vrw(mypid, (u32)(unsigned long)(q + bb), (u8 *)want + bb, 1, 1);
                 }
                 sc(0xf0002 /* ARM cacheflush */, (long)q, (long)(q + P->n), 0, 0, 0);
                 hold(0);
                 if (r <= 0) { bad = -3; continue; }
+                /* the call to our code is Sony's again: a moment before our code goes, should the UI be in it */
+                if (P->kind == IRIS_W && !mine) { long ts[2] = {0, 200000000}; sc(SYS_NANOSLEEP, (long)ts, 0, 0, 0, 0); }
             }
             if (P->kind == H24) n += on;
         }
-    irisin = 0;                                  /* both iris places ours: the label says so */
-    { int t = 0; for (int k = 0; k < NH24P; k++) { const struct h24p *P = &h24ps[k];
-          if (P->kind != H24 && h24fs[P->f].map && h24ours(P, h24fs[P->f].map + (P->off - h24fs[P->f].page))) t++; }
-      if (t == 2 && on) irisin = irisfl; }
+    irisin = 0;                                  /* every iris place ours: the label says so */
+    { int t = 0, all = 0; for (int k = 0; k < NH24P; k++) { const struct h24p *P = &h24ps[k];
+          if (P->kind != IRIS_T && P->kind != IRIS_W) continue;
+          all++; if (h24fs[P->f].map && h24ours(P, h24fs[P->f].map + (P->off - h24fs[P->f].page))) t++; }
+      if (t == all && on) irisin = irisfl; }
     if (!on) for (int f = 0; f < NH24F; f++) if (h24fs[f].map) { sc(SYS_MUNMAP, (long)h24fs[f].map, 4096, 0, 0, 0); h24fs[f].map = 0; }
     return n ? n : bad;
 }

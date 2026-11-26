@@ -5,6 +5,7 @@ every command costs a mode change (each one sends the camera back through its US
   camsh.py serve                 log in (switching the camera to service mode) and wait for commands
   camsh.py sh 'COMMAND'          run COMMAND in the camera's shell (as root), print its output
   camsh.py pull REMOTE LOCAL     copy a file from the camera
+  camsh.py push LOCAL REMOTE     copy a file to the camera (big ones to the SD card: /android/dev is RAM, ~4 MB free)
   camsh.py shot OUT.png          screenshot of the Android screen (screencap into RAM, copied over, removed)
   camsh.py quit                  end the session properly (before an install, say)
 
@@ -68,6 +69,9 @@ def serve():
                         elif req[0] == 'pull':
                             with open(req[2], 'wb') as f: b.readFile(req[1], f)
                             res = {'ok': '%d bytes to %s' % (os.path.getsize(req[2]), req[2])}
+                        elif req[0] == 'push':
+                            with open(req[1], 'rb') as f: b.writeFile(req[2], f)
+                            res = {'ok': '%d bytes to %s' % (os.path.getsize(req[1]), req[2])}
                         elif req[0] == 'shot':
                             out, rc = sh(cam, 'rm -f %s; %s' % (SHOT_REMOTE, SHOT))
                             if rc: raise Exception('screencap: rc %d %s' % (rc, out))
@@ -89,6 +93,8 @@ def serve():
 def client(args):
     if args[0] in ('pull', 'shot'):
         args = args[:-1] + [os.path.abspath(args[-1])]
+    if args[0] == 'push':
+        args = [args[0], os.path.abspath(args[1]), args[2]]
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.connect(SOCK)
     s.sendall((json.dumps(args) + '\n').encode())
@@ -102,7 +108,7 @@ def client(args):
 
 if __name__ == '__main__':
     a = sys.argv[1:]
-    usage = {'serve': 0, 'sh': 1, 'pull': 2, 'shot': 1, 'quit': 0}
+    usage = {'serve': 0, 'sh': 1, 'pull': 2, 'push': 2, 'shot': 1, 'quit': 0}
     if not a or a[0] not in usage or len(a) != usage[a[0]] + 1:
         sys.exit(__doc__)
     sys.exit(serve() if a[0] == 'serve' else client(a))

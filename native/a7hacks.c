@@ -17,7 +17,10 @@
  *   liba7hacks.so --version                       when this helper was built (UTC)
  *   liba7hacks.so --memory-dump path [--all]      copy the UI's own data to path (for study elsewhere;
  *                                                 --all: and the driver memory it has mapped, RAM pages only)
- *   liba7hacks.so --screenshot path               Sony's own screen (its OSD, not the live view) to path as a PNG
+ *   liba7hacks.so --memory-changes start len [ms]  which 64 KB blocks of physical memory change (read only)
+ *   liba7hacks.so --screenshot [osd.png lv.png] both.png [--evf]
+ *                                                 Sony's own screen as a PNG: its OSD over the live view (--evf:
+ *                                                 placed as on the EVF); with three names also each on its own
  *   liba7hacks.so --pic-census                    which of our pictures the UI has unpacked now (read only)
  *   liba7hacks.so --pic-bench                     time the picture patcher's steps on the camera (changes nothing)
  *   liba7hacks.so --glyph-cache [--mark-stale | --list] [--all]
@@ -1154,17 +1157,31 @@ static int memdump(const char *path, int dev) {
     return 0;
 }
 
-/* --screenshot path: Sony's own screen as a PNG (RGBA, 640x480). That is the OSD the UI (im.elf) draws over the
- * live view, with its transparency; not the live view itself (no Linux process has it) and not Android (that's
- * screencap's). The UI draws it into two buffers in /dev/stream, double buffered: its two mappings of exactly
- * 640x480 x 16 bits, RGBA4444, rows top down. Which of the two is on screen isn't known, but once the screen has
- * settled both hold the same frame, so they're compared (up to 20 times, 50 ms apart) until they agree; if they
- * never do (something blinking), the first one is written anyway and the answer says so. Read only: /dev/mem is
- * opened read only, and only those two buffers, in RAM, are read. The PNG is written row by row (deflate's
- * "stored" blocks, uncompressed: ~1.2 MB), so it needs no big buffers. */
+/* --screenshot [osd.png lv.png] both.png [--evf]: Sony's own screen as PNGs. both.png always; osd.png and
+ * lv.png when three names are given.
+ * osd.png (RGBA, 640x480) is the OSD the UI (im.elf) draws over the live view, with its transparency (Android
+ * too, when an app is in front: it reaches the panel through the same buffers). The UI draws it into two buffers
+ * in /dev/stream, double buffered: its two mappings of exactly 640x480 x 16 bits, RGBA4444, rows top down. Which
+ * of the two is on screen isn't known, but once the screen has settled both hold the same frame, so they're
+ * compared (for up to a second, 50 ms apart) until they agree; if they never do (something blinking), the first one
+ * is written anyway and the answer says so.
+ * lv.png (RGB, 640x426) is the live view: no Linux process maps it. The image processor writes it, double
+ * buffered, as UYVY (4:2:2, full range) at fixed physical addresses in the /dev/stream pool (LVA, LVB; found
+ * 2026-11-26 by watching which memory changes, see --memory-changes), copied without tearing (lvgrab).
+ * both.png (RGB, 640x480) is the OSD over the live view, the way the panel shows it: the live view at the top on
+ * the LCD, 27 rows down in the EVF (--evf; nothing tells us which one is on); black behind the OSD when the live
+ * view isn't running (playback, Android). Peaking and zebra are in neither buffer (the display hardware adds them), so no PNG has them.
+ * Read only: /dev/mem and /dev/stream are opened read only, and only those buffers, in RAM, are read. The PNGs
+ * are written row by row (deflate's "stored" blocks, uncompressed), so only the live view needs a buffer. */
 #define OSDW 640
 #define OSDH 480
 #define OSDLEN (OSDW * OSDH * 2)
+#define LVW 640
+#define LVH 426
+#define LVLEN (LVW * LVH * 2)
+#define LVA 0x93022000u
+#define LVB 0x930ed800u
+#define LVEVF 27                 /* the live view's first row on the EVF's screen */
 static u32 crctab[256];
 static u32 crc(u32 c, const u8 *p, int n) {
     if (!crctab[1]) for (u32 i = 0; i < 256; i++) { u32 v = i; for (int k = 0; k < 8; k++) v = v & 1 ? 0xedb88320u ^ v >> 1 : v >> 1; crctab[i] = v; }
@@ -1178,7 +1195,36 @@ static int chunk(int o, const char *type, const u8 *d, int n) {
     return sc(SYS_WRITE, o, (long)h, 8, 0, 0) == 8 && (!n || sc(SYS_WRITE, o, (long)d, n, 0, 0) == n) &&
            sc(SYS_WRITE, o, (long)t, 4, 0, 0) == 4 ? 0 : -1;
 }
-static u8 rowa[OSDW * 2], rowb[OSDW * 2], prow[2 + 5 + 1 + OSDW * 4 + 4];
+/* a PNG written row by row: pngopen, then for each row its pixels at prow + PROWPIX and pngrow, then pngclose.
+ * One IDAT per row: (the zlib header,) a stored block of the row (filter byte 0, then the pixels), (the Adler-32). */
+#define PROWPIX 8
+static u8 rowa[OSDW * 2], rowb[OSDW * 2], prow[PROWPIX + OSDW * 4 + 4];
+static u32 pngy, pngh, ad1, ad2;
+static int pngopen(const char *path, u32 w, u32 h, int rgba) {
+    int o = sc(SYS_OPEN, (long)path, 01 | 0100 | 01000, 0644, 0, 0);
+    if (o < 0) return -1;
+    static const u8 sig[8] = {0x89, 'P', 'N', 'G', 13, 10, 26, 10};
+    u8 ih[13]; be32(ih, w); be32(ih + 4, h); ih[8] = 8; ih[9] = rgba ? 6 : 2; ih[10] = ih[11] = ih[12] = 0;
+    if (sc(SYS_WRITE, o, (long)sig, 8, 0, 0) != 8 || chunk(o, "IHDR", ih, 13) < 0) { sc(SYS_CLOSE, o, 0, 0, 0, 0); return -1; }
+    pngy = 0; pngh = h; ad1 = 1; ad2 = 0;
+    return o;
+}
+static int pngrow(int o, int n) {                /* n: the row's pixel bytes, at prow + PROWPIX */
+    u8 *p = prow + PROWPIX - 6;
+    int len = 1 + n, last = pngy == pngh - 1;
+    p[0] = (u8)last; p[1] = (u8)len; p[2] = (u8)(len >> 8); p[3] = (u8)~len; p[4] = (u8)(~len >> 8); p[5] = 0;
+    if (!pngy) { p -= 2; p[0] = 0x78; p[1] = 0x01; }
+    for (u8 *c = prow + PROWPIX - 1; c < prow + PROWPIX + n; c++) { ad1 = (ad1 + *c) % 65521; ad2 = (ad2 + ad1) % 65521; }
+    int m = (int)(prow + PROWPIX + n - p);
+    if (last) { be32(p + m, ad2 << 16 | ad1); m += 4; }
+    pngy++;
+    return chunk(o, "IDAT", p, m);
+}
+static int pngclose(int o, int bad) {
+    if (!bad && chunk(o, "IEND", 0, 0) < 0) bad = 1;
+    sc(SYS_CLOSE, o, 0, 0, 0, 0);
+    return bad ? -1 : 0;
+}
 /* the pixels in which the two buffers differ (read now); -1 if they can't be read */
 static int osddiff(u32 a, u32 b) {
     int n = 0;
@@ -1188,7 +1234,56 @@ static int osddiff(u32 a, u32 b) {
     }
     return n;
 }
-static int screenshot(const char *path) {
+static u8 lvbuf[LVLEN] __attribute__((aligned(4)));
+static u32 usnow(void);
+static int eq(const char *a, const char *b);
+/* the live view into lvbuf: 1 a whole frame, 2 a frame but the live view isn't running (no buffer changed in
+ * 300 ms), 0 no whole frame, -1 can't map, -2 doesn't look written. The camera writes the two buffers in turn (30
+ * frames a second, so each one is rewritten every ~66 ms and holds still for ~33 ms of that), and a read through
+ * an uncached mapping takes ~70 ms: too slow. So one word in the middle of the other buffer is watched (uncached):
+ * when it changes, the camera is writing that one and this one is whole; it's copied right then through a cached
+ * mapping of /dev/mem (~18 ms; only read, so its cache lines stay clean and are never written back), and the copy
+ * only counts when 64 words spread over the frame, read uncached, still match it (that also catches stale cache
+ * lines). Two tries: A, then B. */
+static int lvgrab(void) {
+    u32 base = LVA & ~0xfffu, len = (LVB + LVLEN - base + 0xfff) & ~0xfffu;
+    long m[2] = {-1, -1};
+    for (int k = 0; k < 2; k++) {               /* 0 uncached (/dev/stream maps uncached), 1 cached (/dev/mem without O_SYNC) */
+        int sfd = sc(SYS_OPEN, (long)(k ? "/dev/mem" : "/dev/stream"), k ? 0 : 0x101000 /* O_RDONLY (| O_SYNC) */, 0, 0, 0);
+        if (sfd >= 0) { m[k] = sc6(SYS_MMAP2, 0, len, 1 /* PROT_READ */, 1 /* MAP_SHARED */, sfd, (long)(base >> 12)); sc(SYS_CLOSE, sfd, 0, 0, 0, 0); }
+    }
+    int r = -1;
+    if ((unsigned long)m[0] < (unsigned long)-4095L && (unsigned long)m[1] < (unsigned long)-4095L) {
+        const volatile u32 *u[2] = {(const volatile u32 *)(m[0] + (LVA - base)), (const volatile u32 *)(m[0] + (LVB - base))};
+        const u32 *c[2] = {(const u32 *)(m[1] + (LVA - base)), (const u32 *)(m[1] + (LVB - base))};
+        u32 aa = 0;
+        for (u32 i = 0; i < 1024; i++) { u32 w = u[0][i]; for (int b = 0; b < 32; b += 8) if ((w >> b & 255) == 0xaa) aa++; }
+        r = aa >= 4096 / 3 ? -2 : 0;
+        for (int t = 0; t < 2 && !r; t++) {
+            const volatile u32 *other = u[!t] + LVLEN / 8;
+            u32 v = *other, t0 = usnow(), moved = 0;
+            while (usnow() - t0 < 300000) if (*other != v) { moved = 1; break; }
+            const u32 *src = c[t];
+            u32 *dst = (u32 *)lvbuf;
+            for (u32 i = 0; i < LVLEN / 4; i++) dst[i] = src[i];
+            int ok = 1;
+            for (u32 i = 0; i < 64; i++) { u32 k = i * (LVLEN / 4 / 64) + i; if (u[t][k] != dst[k]) ok = 0; }
+            if (ok) r = moved ? 1 : 2;
+        }
+    }
+    for (int k = 0; k < 2; k++) if ((unsigned long)m[k] < (unsigned long)-4095L) sc(SYS_MUNMAP, m[k], len, 0, 0, 0);
+    return r;
+}
+static u8 clamp8(int v) { return (u8)(v < 0 ? 0 : v > 255 ? 255 : v); }
+/* live view pixel x of row y (in lvbuf) as RGB */
+static void lvrgb(int x, int y, u8 *q) {
+    const u8 *p = lvbuf + y * LVW * 2 + (x & ~1) * 2;
+    int u = p[0] - 128, v = p[2] - 128, Y = p[1 + (x & 1) * 2];
+    q[0] = clamp8(Y + (359 * v >> 8)); q[1] = clamp8(Y - ((88 * u + 183 * v) >> 8)); q[2] = clamp8(Y + (454 * u >> 8));
+}
+static int screenshot(int argc, char **argv) {
+    int evf = eq(argv[argc - 1], "--evf"), names = argc - 2 - evf;
+    const char *path = names == 3 ? argv[2] : 0, *lvpath = names == 3 ? argv[3] : 0, *bothpath = argv[1 + names];
     fd = sc(SYS_OPEN, (long)"/dev/mem", 0, 0, 0, 0);
     if (fd < 0) { out("error open /dev/mem"); return 2; }
     findprocs(0);
@@ -1201,45 +1296,71 @@ static int screenshot(const char *path) {
     for (int k = 0; k < 2; k++)
         if ((buf[k] & 4095) || (u32)(buf[k] - RAM_LO) >= RAM_SIZE || RAM_SIZE - (buf[k] - RAM_LO) < OSDLEN) { out("error OSD buffer not in RAM"); return 2; }
     int d = 0, tries = 0;
-    while (tries < 20) {
+    u32 t0 = usnow();
+    for (;;) {                                  /* a compare reads both buffers: ~150 ms */
         tries++;
         if ((d = osddiff(buf[0], buf[1])) < 0) { out("error read"); return 2; }
-        if (!d) break;
+        if (!d || usnow() - t0 > 1000000) break;
         long ts[2] = {0, 50000000};
         sc(SYS_NANOSLEEP, (long)ts, 0, 0, 0, 0);
     }
-    int o = sc(SYS_OPEN, (long)path, 01 | 0100 | 01000, 0644, 0, 0);
-    if (o < 0) { out("error open output"); return 2; }
-    static const u8 sig[8] = {0x89, 'P', 'N', 'G', 13, 10, 26, 10};
-    u8 ih[13]; be32(ih, OSDW); be32(ih + 4, OSDH); ih[8] = 8; ih[9] = 6; ih[10] = ih[11] = ih[12] = 0;   /* 8 bits, RGBA */
-    int bad = sc(SYS_WRITE, o, (long)sig, 8, 0, 0) != 8 || chunk(o, "IHDR", ih, 13) < 0;
-    u32 s1 = 1, s2 = 0;            /* Adler-32 of the image data */
-    int changed = 0;
-    for (int y = 0; y < OSDH && !bad; y++) {
-        /* one IDAT per row: (the zlib header,) a stored block of the row (filter byte 0, then RGBA), (the Adler-32) */
-        int n = 0;
-        if (!y) { prow[n++] = 0x78; prow[n++] = 0x01; }
-        int len = 1 + OSDW * 4;
-        prow[n++] = y == OSDH - 1; prow[n++] = len; prow[n++] = len >> 8; prow[n++] = ~len; prow[n++] = ~len >> 8;
-        if (pread_(buf[0] + y * OSDW * 2, rowa, OSDW * 2) < 0 || pread_(buf[1] + y * OSDW * 2, rowb, OSDW * 2) < 0) { bad = 1; break; }
-        u8 *q = prow + n; *q++ = 0;
-        for (int x = 0; x < OSDW * 2; x += 2) {
-            u32 v = rowa[x] | rowa[x + 1] << 8;
-            if (!d && (rowa[x] != rowb[x] || rowa[x + 1] != rowb[x + 1])) changed++;
-            *q++ = (u8)((v >> 12 & 15) * 17); *q++ = (u8)((v >> 8 & 15) * 17); *q++ = (u8)((v >> 4 & 15) * 17); *q++ = (u8)((v & 15) * 17);
+    /* the live view: with three names it must be there; with one, an old or missing frame means black behind
+     * the OSD (playback, menus over a stopped live view, Android) */
+    if ((u32)(LVA - RAM_LO) >= RAM_SIZE || RAM_SIZE - (LVB - RAM_LO) < LVLEN) { out("error live view not in RAM"); return 2; }
+    int lv = lvgrab();
+    if (lv == -1) { out("error map live view"); return 2; }
+    if (!lv) { out("error live view: no whole frame (it changed while copied)"); return 2; }
+    if (lvpath && lv == -2) { out("error no live view (the buffer was never written)"); return 2; }
+    int bad = 0, changed = 0, o;
+    out("written");
+    /* the OSD */
+    if (path) {
+        if ((o = pngopen(path, OSDW, OSDH, 1)) < 0) { out(" error open output"); return 2; }
+        for (int y = 0; y < OSDH && !bad; y++) {
+            if (pread_(buf[0] + y * OSDW * 2, rowa, OSDW * 2) < 0 || pread_(buf[1] + y * OSDW * 2, rowb, OSDW * 2) < 0) { bad = 1; break; }
+            u8 *q = prow + PROWPIX;
+            for (int x = 0; x < OSDW * 2; x += 2) {
+                u32 v = rowa[x] | rowa[x + 1] << 8;
+                if (!d && (rowa[x] != rowb[x] || rowa[x + 1] != rowb[x + 1])) changed++;
+                *q++ = (u8)((v >> 12 & 15) * 17); *q++ = (u8)((v >> 8 & 15) * 17); *q++ = (u8)((v >> 4 & 15) * 17); *q++ = (u8)((v & 15) * 17);
+            }
+            if (pngrow(o, OSDW * 4) < 0) bad = 1;
         }
-        for (u8 *c = prow + n; c < q; c++) { s1 = (s1 + *c) % 65521; s2 = (s2 + s1) % 65521; }
-        n = (int)(q - prow);
-        if (y == OSDH - 1) { be32(prow + n, s2 << 16 | s1); n += 4; }
-        if (chunk(o, "IDAT", prow, n) < 0) bad = 1;
+        if (pngclose(o, bad) < 0) { out(" error write"); return 2; }
+        out(" "); out(path); out(",");
     }
-    if (!bad && chunk(o, "IEND", 0, 0) < 0) bad = 1;
-    sc(SYS_CLOSE, o, 0, 0, 0, 0);
-    if (bad) { out("error write"); return 2; }
-    out("written "); out(path);
-    if (d) { out(" (the buffers never agreed: "); outn((u32)d); out(" pixels differ; this is the first one, "); outx(buf[0]); out(")"); }
-    else if (changed) { out(" (the screen changed while writing: "); outn((u32)changed); out(" pixels)"); }
+    /* the live view */
+    if (lvpath) {
+        if ((o = pngopen(lvpath, LVW, LVH, 0)) < 0) { out(" error open output"); return 2; }
+        for (int y = 0; y < LVH && !bad; y++) {
+            for (int x = 0; x < LVW; x++) lvrgb(x, y, prow + PROWPIX + x * 3);
+            if (pngrow(o, LVW * 3) < 0) bad = 1;
+        }
+        if (pngclose(o, bad) < 0) { out(" error write"); return 2; }
+        out(" "); out(lvpath); out(",");
+    }
+    /* both: the OSD over the live view (black where there's none) */
+    if ((o = pngopen(bothpath, OSDW, OSDH, 0)) < 0) { out(" error open output"); return 2; }
+    int top = evf ? LVEVF : 0, live = lv == 1 || (lv == 2 && lvpath);
+    for (int y = 0; y < OSDH && !bad; y++) {
+        if (pread_(buf[0] + y * OSDW * 2, rowa, OSDW * 2) < 0 || (!path && pread_(buf[1] + y * OSDW * 2, rowb, OSDW * 2) < 0)) { bad = 1; break; }
+        u8 *q = prow + PROWPIX;
+        for (int x = 0; x < OSDW; x++, q += 3) {
+            u32 v = rowa[2 * x] | rowa[2 * x + 1] << 8, a = v & 15;
+            if (!path && !d && (rowa[2 * x] != rowb[2 * x] || rowa[2 * x + 1] != rowb[2 * x + 1])) changed++;
+            u8 l[3] = {0, 0, 0};
+            if (live && y >= top && y < top + LVH) lvrgb(x, y - top, l);
+            for (int c = 0; c < 3; c++) q[c] = (u8)(((v >> (12 - 4 * c) & 15) * 17 * a + l[c] * (15 - a)) / 15);
+        }
+        if (pngrow(o, OSDW * 3) < 0) bad = 1;
+    }
+    if (pngclose(o, bad) < 0) { out(" error write"); return 2; }
+    out(" "); out(bothpath);
+    if (d) { out(" (the OSD buffers never agreed: "); outn((u32)d); out(" pixels differ; this is the first one, "); outx(buf[0]); out(")"); }
+    else if (changed) { out(" (the OSD changed while writing: "); outn((u32)changed); out(" pixels)"); }
     else { out(" ("); outn((u32)tries); out(tries == 1 ? " look)" : " looks)"); }
+    if (lv == 2) out(lvpath ? " (live view not running: an old frame)" : " (no live view running)");
+    if (lv == -2) out(" (no live view)");
     return 0;
 }
 
@@ -1803,6 +1924,57 @@ static int setclock(void) {
     return 0;
 }
 
+/* --memory-changes start len [ms]: which 64 KB blocks of physical memory change (for finding the live view's
+ * buffers, which belong to the other CPU: no Linux process maps them). start and len in hex, whole blocks, in RAM;
+ * ms (decimal, default 100) between the two passes. Read only: /dev/mem is opened read only; each block is read
+ * twice and hashed. Prints one line per MB: its address, then one character per block: C changed, 0 all zero,
+ * a untouched since power-on (DRAM's 0xaa pattern with a few bits flipped), . the same both times; and the time
+ * one pass took. */
+#define MCBLK 0x10000u
+static u8 mcbuf[MCBLK];
+static u32 mchash[9216];                     /* 576 MB in blocks */
+static u8 mckind[9216];
+static int mcpass(u32 start, u32 nb, int second) {
+    for (u32 b = 0; b < nb; b++) {
+        if (pread_(start + b * MCBLK, mcbuf, MCBLK) < 0) return -1;
+        u32 h = 2166136261u, zero = 0, aa = 0;
+        for (u32 i = 0; i < MCBLK; i += 4) {
+            u32 w = rd32(mcbuf + i);
+            h = (h ^ w) * 16777619u;
+            if (!w) zero++;
+            for (int k = 0; k < 32; k += 8) if ((w >> k & 255) == 0xaa) aa++;
+        }
+        if (!second) {
+            mchash[b] = h;
+            mckind[b] = zero == MCBLK / 4 ? '0' : aa >= MCBLK / 4 ? 'a' : '.';
+        } else if (h != mchash[b]) mckind[b] = 'C';
+    }
+    return 0;
+}
+static int memchanges(const char *s, const char *l, const char *m) {
+    u32 start = 0, len = 0, ms = 100;
+    for (const char *p = s; *p; p++) { int v = hexv(*p); if (v < 0) { out("error usage"); return 1; } start = start << 4 | (u32)v; }
+    for (const char *p = l; *p; p++) { int v = hexv(*p); if (v < 0) { out("error usage"); return 1; } len = len << 4 | (u32)v; }
+    if (m && (!dec(m, &ms) || ms > 10000)) { out("error usage"); return 1; }
+    if (!*s || !*l || !len || (start | len) & (MCBLK - 1) || len / MCBLK > sizeof mchash / 4) { out("error usage"); return 1; }
+    if (start - RAM_LO >= RAM_SIZE || RAM_SIZE - (start - RAM_LO) < len) { out("error not in RAM"); return 2; }
+    fd = sc(SYS_OPEN, (long)"/dev/mem", 0, 0, 0, 0);
+    if (fd < 0) { out("error open /dev/mem"); return 2; }
+    u32 nb = len / MCBLK, t0 = usnow();
+    if (mcpass(start, nb, 0) < 0) { out("error read"); return 2; }
+    u32 t1 = usnow();
+    long ts[2] = {(long)(ms / 1000), (long)(ms % 1000) * 1000000};
+    sc(SYS_NANOSLEEP, (long)ts, 0, 0, 0, 0);
+    if (mcpass(start, nb, 1) < 0) { out("error read"); return 2; }
+    u32 per = MCBLK * 16 > len ? nb : 16;
+    for (u32 b = 0; b < nb; b += per) {
+        sayx(start + b * MCBLK); say(" ");
+        sc(SYS_WRITE, 1, (long)(mckind + b), (long)(nb - b < per ? nb - b : per), 0, 0); say("\n");
+    }
+    out("pass "); outn((t1 - t0) / 1000); out(" ms");
+    return 0;
+}
+
 /* When this helper was built: "yyyy-mm-dd HH:MM:SS", UTC (Gradle's buildHelper passes it). --version prints it; the
  * app runs that (as itself, no root needed) for its info dialog. */
 #ifndef A7_BUILT
@@ -1820,10 +1992,11 @@ static int run(int argc, char **argv) {
     if (eq(o, "--font-patcher") && (argc == 2 || (argc == 3 && eq(o2, "--text-only")))) return font(1, argc == 2);
     if (argc == 2 && eq(o, "--font-restore")) return font(0, 1);
     if (argc == 2 && eq(o, "--set-clock")) return setclock();
-    if (argc == 3 && eq(o, "--screenshot")) return screenshot(argv[2]);
+    if (eq(o, "--screenshot") && (argc == 3 || argc == 5 || ((argc == 4 || argc == 6) && eq(argv[argc - 1], "--evf")))) return screenshot(argc, argv);
     if (argc == 2 && eq(o, "--pic-census")) return census();
     if (argc == 2 && eq(o, "--pic-bench")) return bench();
     if (eq(o, "--memory-dump") && (argc == 3 || (argc == 4 && eq(argv[3], "--all")))) return memdump(argv[2], argc == 4);
+    if (eq(o, "--memory-changes") && (argc == 4 || argc == 5)) return memchanges(argv[2], argv[3], argc == 5 ? argv[4] : 0);
     if (eq(o, "--glyph-cache")) {
         int mode = 0;
         for (int i = 2; i < argc; i++) {

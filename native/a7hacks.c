@@ -1489,16 +1489,10 @@ static int bench(void) {
             for (u32 j = 0; j < np; j++) { pages++; res += vec[j] & 1; }
         for (int i = 0; i < P->count; i++) {
             u32 R = P->raw[i], raw = R & 0x1fffffffu;
-            const u16 *tab = R >> 30 & 1 ? pic_red : R >> 29 & 1 ? pic_blue : pic_hue;
             u32 a = usnow();
             if (lz_decode(P->map + P->off[i], (int)P->len[i], pbuf, (int)raw) != (int)raw) continue;
             u32 b = usnow();
-            for (u32 j = 0; j + 1 < raw; j += 2) if (!(pbuf[j] & 15)) pbuf[j] = pbuf[j + 1] = 0;
-            if (R >> 31)
-                for (u32 j = 0; j + 1 < raw; j += 2) {
-                    u32 px = pbuf[j] | (u32)pbuf[j + 1] << 8, c = tab[px >> 4];
-                    pbuf[j] = (u8)((c & 15) << 4 | (px & 15)); pbuf[j + 1] = (u8)(c >> 4);
-                }
+            picprep(pbuf, raw, R);
             u32 c = usnow();
             u32 rl = P->rlen[i];
             if (rl <= PIC_MAXRUNS && lz_decode(P->runs + P->run[i], 0x7fffffff, prun, (int)rl) == (int)rl) {

@@ -68,19 +68,26 @@ static int picstate(int k, int i) {
     if (pfnv(p, P->len[i]) == P->old[i]) return 0;
     return -1;
 }
+/* the pixels of an unpacked picture (raw bytes, RGBA4444) the way we change them: fully transparent ones colour 0,
+ * and with R's top bit the colours through the table (bit 30: pic_red, bit 29: pic_blue, else pic_hue); one pass
+ * (a transparent pixel gets what the table gives colour 0, as when it was cleared first) */
+static void picprep(u8 *b, u32 raw, u32 R) {
+    const u16 *tab = R >> 30 & 1 ? pic_red : R >> 29 & 1 ? pic_blue : pic_hue;
+    if (!(R >> 31)) { for (u32 j = 0; j + 1 < raw; j += 2) if (!(b[j] & 15)) b[j] = b[j + 1] = 0; return; }
+    u32 c0 = tab[0]; u8 z0 = (u8)((c0 & 15) << 4), z1 = (u8)(c0 >> 4);
+    for (u32 j = 0; j + 1 < raw; j += 2) {
+        u32 a = b[j] & 15;
+        if (!a) { b[j] = z0; b[j + 1] = z1; continue; }
+        u32 c = tab[(b[j] | (u32)b[j + 1] << 8) >> 4];
+        b[j] = (u8)((c & 15) << 4 | a); b[j + 1] = (u8)(c >> 4);
+    }
+}
 /* makes picture i of file k ours: 0 done, -1 it didn't come out as expected (nothing written), -2 write error */
 static int picset(int k, int i) {
     const struct pp *P = &pps[k];
-    u32 raw = P->raw[i] & 0x1fffffffu, tint = P->raw[i] >> 31;   /* top bit: takes the accent colour */
-    const u16 *tab = P->raw[i] >> 30 & 1 ? pic_red :              /* the next one: a warning, red instead */
-                     P->raw[i] >> 29 & 1 ? pic_blue : pic_hue;    /* the one after: the level, blue */
+    u32 raw = P->raw[i] & 0x1fffffffu;
     if (raw > PIC_MAXRAW || lz_decode(P->map + P->off[i], (int)P->len[i], pbuf, (int)raw) != (int)raw) return -1;
-    for (u32 j = 0; j + 1 < raw; j += 2) if (!(pbuf[j] & 15)) pbuf[j] = pbuf[j + 1] = 0;   /* clear: colour 0 */
-    if (tint)                                  /* Sony's orange in another hue: each pixel's colour by the table */
-        for (u32 j = 0; j + 1 < raw; j += 2) {
-            u32 px = pbuf[j] | (u32)pbuf[j + 1] << 8, c = tab[px >> 4];
-            pbuf[j] = (u8)((c & 15) << 4 | (px & 15)); pbuf[j + 1] = (u8)(c >> 4);
-        }
+    picprep(pbuf, raw, P->raw[i]);             /* clear; Sony's orange in another hue (top bit of _raw) */
     u32 rl = P->rlen[i];
     if (rl > PIC_MAXRUNS || lz_decode(P->runs + P->run[i], 0x7fffffff, prun, (int)rl) != (int)rl) return -1;
     const u8 *q = prun, *qe = prun + rl;

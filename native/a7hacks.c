@@ -18,6 +18,7 @@
  *   liba7hacks.so --memory-dump path [--all]      copy the UI's own data to path (for study elsewhere;
  *                                                 --all: and the driver memory it has mapped, RAM pages only)
  *   liba7hacks.so --screenshot path               Sony's own screen (its OSD, not the live view) to path as a PNG
+ *   liba7hacks.so --pic-census                    which of our pictures the UI has unpacked now (read only)
  *   liba7hacks.so --glyph-cache [--mark-stale | --list] [--all]
  *                                                 UI font: show the UI's glyph cache (--mark-stale: and mark it
  *                                                 stale; --list: and list, with pictures, the glyphs drawn since;
@@ -1410,6 +1411,56 @@ static int texpass(void) {
 #endif
 }
 
+/* --pic-census: which of our pictures the UI has unpacked right now (read only). Both kinds of texture header in
+ * the UI's [heap] and anonymous memory: the views' own (as texpass) and the label store's (0xabcdef, as
+ * picpaint). One line each: S (still Sony's picture) or N (not: ours, or changed since), the file (0 cmn, 1 EVF,
+ * 2 DSLR, 3 DSC), the resource id, the size, the physical address; then "census N textures". For finding the
+ * pictures that are on screen most (the patcher's order). */
+static void say(const char *s);
+static void sayn(u32 v);
+static void sayx(u32 v);
+static int census1(u32 res, u32 tpa, u32 dim) {
+    int ki = picfind(0x1a000000u | (res & 0xffffff));
+    if (ki < 0) return 0;
+    int k = ki >> 16, i = ki & 0xffff;
+    u32 raw = pps[k].raw[i] & 0x1fffffffu, tw = dim & 0xffff, th = dim >> 16;
+    if (!tw || !th || tw * th * 2 != raw || raw > PIC_MAXRAW || (tpa & 3)) return 0;
+    if (tpa < RAM_LO || tpa - RAM_LO > RAM_SIZE - raw) return 0;
+    for (int j = 0; j < ntx; j++) if (txpa[j] == tpa) return 0;
+    if (ntx < MAXTEX) txpa[ntx++] = tpa;
+    if (pread_(tpa, pbuf, (int)raw) < 0) return 0;
+    say(pfnv(pbuf, raw) == pps[k].ohash[i] ? "S " : "N "); sayn((u32)k); say(" ");
+    sayx(0x02000000u | (res & 0xffffff)); say(" "); sayn(tw); say("x"); sayn(th); say(" "); sayx(tpa); say("\n");
+    return 1;
+}
+static int census(void) {
+    fd = sc(SYS_OPEN, (long)"/dev/mem", 0, 0, 0, 0);
+    if (fd < 0) { out("error open /dev/mem"); return 2; }
+    for (int k = 0; k < NPP; k++) { pps[k].on = 0; if (picmap(k, 0) == 0) pps[k].on = 1; }
+    findprocs(0);
+    if (!np_) { out("noui"); return 1; }
+    int pid = plist[0];
+    nst = 0; heaponly = 1; int r = readmaps(pid); heaponly = 0;
+    if (r < 0) { out("error maps"); return 2; }
+    int f = pm_open(pid); if (f < 0) { out("error pagemap"); return 2; }
+    int n = 0; ntx = 0;
+    for (int k = 0; k < nrng; k++)
+        for (u32 va = rs[k]; va < rend[k]; va += 4096) {
+            u8 e[8]; unsigned long long res; u32 pa;
+            if (sc(SYS_LLSEEK, f, 0, (long)((va >> 12) * 8), (long)&res, 0) < 0 || sc(SYS_READ, f, (long)e, 8, 0, 0) != 8) continue;
+            if (!(pa = pm_phys(e, va)) || pread_(pa, tpg, 4096) < 0) continue;
+            for (int j = 0; j + 4 <= 4096; j += 4) {
+                u32 w = rd32(tpg + j);
+                if (j >= 16 && w >> 24 == 2 && rd32(tpg + j - 12) == 1 && rd32(tpg + j - 8) == 0)
+                    n += census1(w, rd32(tpg + j - 4), rd32(tpg + j - 16));
+                else if (w == 0xabcdefu && j + 0x2c <= 4096)
+                    n += census1(rd32(tpg + j + 0x28), rd32(tpg + j + 0x24), rd32(tpg + j + 0x18));
+            }
+        }
+    out("census "); outn((u32)n); out(" textures");
+    return 0;
+}
+
 /* seconds since some fixed moment (CLOCK_MONOTONIC: not moved by --set-clock) */
 static u32 secs(void) {
 #ifdef HOST
@@ -1667,6 +1718,7 @@ static int run(int argc, char **argv) {
     if (argc == 2 && eq(o, "--font-restore")) return font(0, 1);
     if (argc == 2 && eq(o, "--set-clock")) return setclock();
     if (argc == 3 && eq(o, "--screenshot")) return screenshot(argv[2]);
+    if (argc == 2 && eq(o, "--pic-census")) return census();
     if (eq(o, "--memory-dump") && (argc == 3 || (argc == 4 && eq(argv[3], "--all")))) return memdump(argv[2], argc == 4);
     if (eq(o, "--glyph-cache")) {
         int mode = 0;

@@ -79,6 +79,7 @@ public class StartService extends Service {
      * Restart button: stops the root sampler and all three liba7hacks.so loops (--exposure-patcher, --label-patcher, --font-patcher); the
      * supervisor then starts new ones, reads A7HACKS.INI again (so a changed font or icons option takes effect)
      * and writes the lens info afresh. Call from a background thread (the root exec call may block briefly).
+     * (A card put back in does only the A7HACKS.INI and lens info part of this: see supervise().)
      */
     static void restart(Context ctx) {
         jlog(ctx, "restart requested");
@@ -177,7 +178,8 @@ public class StartService extends Service {
         Integer clockOffset = null;            // the camera's time zone plus summer time (minutes), once known
         final SummerTime summer = new SummerTime(ctx);
         boolean summerConfigured = false;
-        boolean cardIn = false;                // for the summer time's tzdata: read it as soon as a card goes in
+        boolean cardIn = false, cardSeen = false;   // a card put (back) in: A7HACKS.INI and the tzdata read again
+        String summerZone = null;              // the timezone the summer time was configured with
         final String clockOld = Starter.clockStatus();   // an answer from before (a restart): not news
         AppLog.add("started");
         while (true) {
@@ -198,6 +200,18 @@ public class StartService extends Service {
                     irisLogged = null;
                     summerConfigured = false;
                 }
+                // a card put back in (the owner may have changed A7HACKS.INI or put tzdata on it on a PC): read
+                // A7HACKS.INI again and write the lens info afresh, as Restart does, but leave the root loops running
+                boolean in = Starter.sdRoot() != null;
+                boolean cardBack = in && !cardIn && cardSeen;
+                cardIn = in;
+                if (in) cardSeen = true;
+                if (cardBack && profiles != null) {
+                    AppLog.add("SD card back: reading A7HACKS.INI again");
+                    profiles = null;
+                    writer = new LensWriter(setting, lookup, tool, log);
+                    loggedStopped = false;
+                }
                 // The SD card is the way out: without one, nothing of ours runs as root. Should the helper ever make
                 // the camera restart, over and over (the app starts with it), take the card out, uninstall the
                 // app, and the card can go back in. So A7HACKS.INI (the card) first; all the rest waits for it.
@@ -209,13 +223,13 @@ public class StartService extends Service {
                     try { Thread.sleep(1000); } catch (InterruptedException e) { return; }
                     continue;
                 }
-                boolean in = Starter.sdRoot() != null;
-                if (!summerConfigured) {
-                    summer.configure(timezoneWanted);
+                String tzw = timezoneWanted;
+                if (!summerConfigured || (tzw == null ? summerZone != null : !tzw.equals(summerZone))) {
+                    summer.configure(tzw);
+                    summerZone = tzw;
                     summerConfigured = true;
                     summer.card();
-                } else if (in && !cardIn) summer.card();
-                cardIn = in;
+                } else if (cardBack) summer.card();
                 // 0. the clock: Linux's clock from the camera's own, now and then every minute (it stands still
                 //    while the camera sleeps); the answer comes a moment later
                 if (SystemClock.elapsedRealtime() - lastClockTry > 60000) {

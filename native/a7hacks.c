@@ -751,7 +751,7 @@ static int fset1(int f, int i) {
     return frange(f, i) == 1 ? 0 : -1;
 }
 
-#define PIC_BATCH 25                    /* pictures per pass of the font patcher's loop (four passes a second while there are more) */
+#define PIC_BATCH 25                    /* pictures per pass of the font patcher's loop (passes 10 ms apart while there are more) */
 #include "pics.c"
 
 /* The UI reads the fonts through buffered file reads (1 KB at a time, at 1 KB boundaries). A character that
@@ -1551,7 +1551,7 @@ static int font(int on, int icons) {
             findwindows();
             for (int f = 0; f < NPF; f++) if (act[f]) for (int i = 0; i < pfs[f].count; i++) {
                 if (frange(f, i) == 1) continue;
-                if (crossesedge(f, i) && t < 120) continue;      /* waits up to 2 minutes for the UI to move on */
+                if (crossesedge(f, i) && secs() - t0 < 120) continue;   /* waits up to 2 minutes for the UI to move on */
                 if (fset(f, i) < 0) { ftstatus("error write"); out("error write"); return 2; }
                 done++; left--; wrote = 1;
             }
@@ -1572,13 +1572,13 @@ static int font(int on, int icons) {
             nfwin = 0;
             if (cache >= 0)
                 for (int w = 0; w < nwin; w++) if (winpatched(winf[w], win[w])) { fwin[nfwin] = win[w]; fwf[nfwin] = winf[w]; nfwin++; }
-            if (nfwin) fwt = t; else nfwin = -1;
+            if (nfwin) fwt = secs(); else nfwin = -1;
         } else if (nfwin >= 0) {
             findwindows();
             int moved = 1;
             for (int w = 0; w < nfwin; w++) for (int v = 0; v < nwin; v++) if (fwin[w] == win[v] && fwf[w] == winf[v]) moved = 0;
             if (moved) { int c = flushcache(); if (c >= 0) { cache = c; labels = labelflush(1); } nfwin = -1; }
-            else if (t - fwt > 360) nfwin = -1;               /* not within an hour or so: leave it */
+            else if (secs() - fwt > 3600) nfwin = -1;         /* not within an hour: leave it */
         }
         if (nold && labels >= 0) labelflush(0);   /* the out-of-date labels that were in use: once they aren't */
         if (!tookt && !left && (!pics || pics_state == 2)) { tookt = secs() - t0; if (!tookt) tookt = 1; }
@@ -1588,12 +1588,14 @@ static int font(int on, int icons) {
         out(st); out(" | ");
         if (++hostticks >= HOST_TICKS) return 0;
 #endif
-        if (pics_state == 2 && (texd == -2 || (texd2 && t >= texd2))) {   /* the pictures unpacked before ours came */
+        if (pics_state == 2 && (texd == -2 || (texd2 && secs() >= texd2))) {   /* the pictures unpacked before ours came */
             int r = texpass();
             if (r >= 0) texd = (texd > 0 ? texd : 0) + r; else if (texd == -2) texd = r;
-            texd2 = texd2 ? 0 : t + 60;              /* once more some 60 passes later (minutes), then no more */
+            texd2 = texd2 ? 0 : secs() + 600;        /* once more ten minutes later, then no more */
         }
-        long ts[2] = {pleft ? 0 : left ? 1 : 10, pleft ? 250000000 : 0};
+        /* while pictures are left only a moment (nice 19 already lets the camera go first): a quarter second
+         * after every batch was about 50 s of the patcher's time */
+        long ts[2] = {pleft ? 0 : left ? 1 : 10, pleft ? 10000000 : 0};
         sc(SYS_NANOSLEEP, (long)ts, 0, 0, 0, 0);
     }
 }

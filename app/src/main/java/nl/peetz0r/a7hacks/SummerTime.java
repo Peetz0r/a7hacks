@@ -2,6 +2,8 @@ package nl.peetz0r.a7hacks;
 
 import android.content.Context;
 
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Field;
@@ -15,23 +17,27 @@ import java.lang.reflect.Field;
  * stays after a restart like any other.
  *
  * The rules come from IANA's tzdata: the release this app was built with (assets/tzdataYYYYx.tar.gz, IANA's
- * tarball as is; the APK holds it un-gzipped).
+ * tarball as is; the APK holds it un-gzipped), or a newer one from the root of the SD card: IANA's tarball renamed
+ * to an upper case 8.3 name starting with TZ (TZDATA.TGZ, TZ2027A.GZ, or un-gzipped TZDATA.TAR), or a zic input
+ * file such as tzdata.zi (TZDATA.ZI). The newest one wins, the built-in one on a tie. The card is looked at again
+ * with every check: when its TZ files have changed (another card, a new file), the tzdata is read again.
  *
  * Only the switch: the area (the time zone's standard offset) stays the owner's. If the zone is ahead of UTC by
  * something the switch can't make (the area is off, or the zone's summer time isn't one hour), it says so and
  * leaves the camera alone.
  */
 final class SummerTime {
-    /** For the info dialog: the tzdata in use, "2026f (built in)"; "not used" without a
+    /** For the info dialog: the tzdata in use, "2026f (built in)" or "2027a (TZDATA.TGZ)"; "not used" without a
      *  timezone in A7HACKS.INI; null until it is read. */
     static volatile String inUse;
 
     private final Context ctx;
     private String zone;                 // from A7HACKS.INI; null: leave the camera alone
     private TzData tz;
-    private String source;               // "built in"
+    private String source;               // "built in", "TZDATA.TGZ on the SD card"
     private boolean stopped;
     private String logged;               // the last state logged, so each is logged once
+    private String cardSeen;             // the card's tzdata files (names, sizes, times) when the tzdata was read
     private Integer staleOffset;         // after a switch: the clock's old offset, until the helper reports anew
     private long switchedAt;
     private int mismatches;              // ticks in a row on which Sony's numbers and the clock's offset disagreed
@@ -51,8 +57,20 @@ final class SummerTime {
         if (zone == null) AppLog.add("summer time: left alone (no timezone in A7HACKS.INI)");
     }
 
-    /** Reads the tzdata if it hasn't been yet. */
+    /**
+     * Reads the tzdata if it hasn't been yet, or again when the card's TZ files have changed (another card, a new
+     * file); without a card it keeps what it has. Right at the start, when a card goes in, and with every tick.
+     */
+    synchronized void card() {
+        if (zone != null && !stopped) readTzdata();
+    }
+
     private boolean readTzdata() {
+        String card = cardFiles();
+        if (tz != null && card != null && !card.equals(cardSeen)) {
+            tz = null;
+            logged = null;                   // say again which tzdata it is
+        }
         if (tz != null) return true;
         if (!load()) {
             stopped = true;
@@ -155,7 +173,7 @@ final class SummerTime {
         return "UTC" + (minutes < 0 ? "-" : "+") + a / 60 + ":" + (a % 60 < 10 ? "0" : "") + a % 60;
     }
 
-    // ---- the tzdata, built in ----
+    // ---- the tzdata: built in, or newer from the SD card ----
 
     private boolean load() {
         String builtIn = null;
@@ -165,6 +183,58 @@ final class SummerTime {
                         && (builtIn == null || n.compareTo(builtIn) > 0))
                     builtIn = n;
         } catch (IOException e) { /* none */ }
+        File best = null;
+        String bestV = null;
+        if (builtIn != null) {
+            try {
+                bestV = peek(ctx.getAssets().open(builtIn));
+            } catch (IOException e) {
+                AppLog.add("summer time: the built-in tzdata can't be read (" + e.getMessage() + ")");
+            }
+        }
+        File sd = Starter.sdRoot();
+        String[] names = sd == null ? null : sd.list();
+        cardSeen = cardFiles(sd, names);
+        if (names != null) {
+            for (String n : names) {
+                String u = n.toUpperCase();
+                if (!isTzName(u)) continue;
+                if (!n.equals(u)) {
+                    AppLog.add("summer time: " + n + " is on the SD card in lower case, which the camera can't open:"
+                        + " rename it to " + u + " on a PC");
+                    continue;
+                }
+                File f = new File(sd, n);
+                String v;
+                try {
+                    v = peek(new FileInputStream(f));
+                } catch (IOException e) {
+                    AppLog.add("summer time: " + n + " on the SD card can't be read (" + e.getMessage() + ")");
+                    continue;
+                }
+                if (v == null) {
+                    AppLog.add("summer time: " + n + " on the SD card doesn't say which tzdata it is: skipped");
+                    continue;
+                }
+                if (TzData.newer(v, bestV)) { best = f; bestV = v; }
+            }
+        }
+        if (best != null) {
+            try {
+                InputStream in = new FileInputStream(best);
+                try {
+                    tz = TzData.read(in);
+                } finally {
+                    in.close();
+                }
+                source = best.getName() + " on the SD card";
+                inUse = tz.version + " (" + best.getName() + ")";
+                return true;
+            } catch (IOException e) {
+                AppLog.add("summer time: " + best.getName() + " on the SD card: " + e.getMessage()
+                    + (builtIn != null ? "; using the built-in tzdata" : ""));
+            }
+        }
         if (builtIn == null) {
             AppLog.add("summer time: no tzdata");
             return false;
@@ -182,6 +252,36 @@ final class SummerTime {
         } catch (IOException e) {
             AppLog.add("summer time: the built-in tzdata: " + e.getMessage());
             return false;
+        }
+    }
+
+    /** The card's tzdata files as "NAME size time;..." (any case, so a rename shows too); null without a card. */
+    private static String cardFiles() {
+        File sd = Starter.sdRoot();
+        return sd == null ? null : cardFiles(sd, sd.list());
+    }
+
+    private static String cardFiles(File sd, String[] names) {
+        if (sd == null || names == null) return null;
+        java.util.Arrays.sort(names);
+        StringBuilder b = new StringBuilder();
+        for (String n : names)
+            if (isTzName(n.toUpperCase())) {
+                File f = new File(sd, n);
+                b.append(n).append(' ').append(f.length()).append(' ').append(f.lastModified()).append(';');
+            }
+        return b.toString();
+    }
+
+    private static boolean isTzName(String u) {
+        return u.startsWith("TZ") && (u.endsWith(".TGZ") || u.endsWith(".GZ") || u.endsWith(".TAR") || u.endsWith(".ZI"));
+    }
+
+    private static String peek(InputStream in) throws IOException {
+        try {
+            return TzData.peekVersion(in);
+        } finally {
+            in.close();
         }
     }
 

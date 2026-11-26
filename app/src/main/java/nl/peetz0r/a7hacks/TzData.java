@@ -88,8 +88,26 @@ final class TzData {
         return t;
     }
 
+    /** Only the version: the "version" file of a tarball, or the "# version" line of a zic input file; null if none. */
+    static String peekVersion(InputStream in) throws IOException {
+        java.io.BufferedInputStream b = new java.io.BufferedInputStream(in);
+        char k = kind(b);
+        if (k != 'z') {
+            Map<String, String> files = untar(k == 'g' ? new GZIPInputStream(b) : b, true);
+            String v = files.get("version");
+            return v == null ? null : v.trim();
+        }
+        BufferedReader r = new BufferedReader(new InputStreamReader(b, "UTF-8"));
+        for (int i = 0; i < 5; i++) {
+            String l = r.readLine();
+            if (l == null) break;
+            if (l.startsWith("# version ")) return l.substring(10).trim();
+        }
+        return null;
+    }
+
     private static TzData readTarball(InputStream in) throws IOException {
-        Map<String, String> files = untar(in);
+        Map<String, String> files = untar(in, false);
         String v = files.get("version");
         if (v == null || v.trim().length() == 0) throw new IOException("no version file: not a tzdata tarball?");
         TzData t = new TzData(v.trim());
@@ -102,8 +120,8 @@ final class TzData {
         return t;
     }
 
-    /** The files we want from a tar stream, by name (without directories). */
-    private static Map<String, String> untar(InputStream in) throws IOException {
+    /** The files we want from a tar stream, by name (without directories). versionOnly: stop at "version". */
+    private static Map<String, String> untar(InputStream in, boolean versionOnly) throws IOException {
         Map<String, String> out = new HashMap<String, String>();
         byte[] h = new byte[512];
         long total = 0;
@@ -123,7 +141,7 @@ final class TzData {
             if (size < 0 || size > MAX_FILE * 4L) throw new IOException("tar member too big");
             String base = name.substring(name.lastIndexOf('/') + 1);
             boolean want = (type == '0' || type == 0) && size <= MAX_FILE
-                && (base.equals("version") || isPart(base));
+                && (base.equals("version") || (!versionOnly && isPart(base)));
             long padded = (size + 511) & ~511L;
             if (want) {
                 total += size;
@@ -132,6 +150,7 @@ final class TzData {
                 if (!readFully(in, data)) throw new IOException("tarball cut short");
                 out.put(base, new String(data, "UTF-8"));
                 skip(in, padded - size);
+                if (versionOnly && base.equals("version")) break;
             } else skip(in, padded);
         }
         return out;
@@ -469,5 +488,24 @@ final class TzData {
         long mp = (5 * doy + 2) / 153;
         long y = yoe + era * 400 + (mp >= 10 ? 1 : 0);
         return (int) Math.max(Integer.MIN_VALUE / 2, Math.min(Integer.MAX_VALUE / 2, y));
+    }
+
+    /** Is a newer than b? "2027a" > "2026z", "2026za" > "2026z". */
+    static boolean newer(String a, String b) {
+        if (a == null) return false;
+        if (b == null) return true;
+        int ya = lead(a), yb = lead(b);
+        if (ya != yb) return ya > yb;
+        String la = a.substring(Math.min(a.length(), 4)), lb = b.substring(Math.min(b.length(), 4));
+        if (la.length() != lb.length()) return la.length() > lb.length();
+        return la.compareTo(lb) > 0;
+    }
+
+    private static int lead(String v) {
+        try {
+            return Integer.parseInt(v.substring(0, Math.min(v.length(), 4)));
+        } catch (NumberFormatException e) {
+            return -1;
+        }
     }
 }

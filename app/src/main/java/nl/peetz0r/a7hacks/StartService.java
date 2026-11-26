@@ -177,6 +177,7 @@ public class StartService extends Service {
         Integer clockOffset = null;            // the camera's time zone plus summer time (minutes), once known
         final SummerTime summer = new SummerTime(ctx);
         boolean summerConfigured = false;
+        boolean cardIn = false;                // for the summer time's tzdata: read it as soon as a card goes in
         final String clockOld = Starter.clockStatus();   // an answer from before (a restart): not news
         AppLog.add("started");
         while (true) {
@@ -208,10 +209,13 @@ public class StartService extends Service {
                     try { Thread.sleep(1000); } catch (InterruptedException e) { return; }
                     continue;
                 }
+                boolean in = Starter.sdRoot() != null;
                 if (!summerConfigured) {
                     summer.configure(timezoneWanted);
                     summerConfigured = true;
-                }
+                    summer.card();
+                } else if (in && !cardIn) summer.card();
+                cardIn = in;
                 // 0. the clock: Linux's clock from the camera's own, now and then every minute (it stands still
                 //    while the camera sleeps); the answer comes a moment later
                 if (SystemClock.elapsedRealtime() - lastClockTry > 60000) {

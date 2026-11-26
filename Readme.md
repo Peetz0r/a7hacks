@@ -15,9 +15,10 @@ When you use Aperture Priority mode with Auto-ISO, it should select a best shutt
 ## Improvements
 * The sensor stabilisation setting is renamed to *Manual Focal Length* to make it look and feel more generic since we're using that setting for more purposes
 * Feed that setting into the logic for the exposure calculations
+* Display that setting in place of the (unknown) aperture on the live view
 * Keep a list of lenses in a file on the SD card, and look up not just the focal length but also the name and widest aperture for that lens, and let the camera write that to the EXIF data.
 * Fix the system clock. Sony has built their own clock driver, but they left the system clock at 1970-01-01 00:01:05 (yes, not exactly 00:00)
-* Screenshot tool for the native UI (CLI for now).
+* Screenshot tool for the native UI (CLI for now, separate OSD and Live view).
 * 24h notation was only used with D-M-Y notation, is now also used with Y-M-D notation.
 
 

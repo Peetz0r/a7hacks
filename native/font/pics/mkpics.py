@@ -69,7 +69,8 @@ if __name__ == '__main__':
                 for lv in ((8, 6, 4) if L else (0,)):
                     render.LEVELS = lv or 8
                     q = tint(fixed(p, L) if L else clean(p)); raw = to_raw(q)
-                    enc = encode(raw, 'q'); slow = 0                # the quick way where it fits (the camera is slow)
+                    enc = encode(raw, 'q'); slow = 0                # the quick way where it fits (the camera is slow),
+                    if len(enc) > r['len']: enc = encode(raw, 'm'); slow = 2   # else the medium way, else the cheapest
                     if len(enc) > r['len']: enc = encode(raw, 'e'); slow = 1
                     res = (enc, raw, lv, slow, base, hu)
                     if len(enc) <= r['len']: break
@@ -84,8 +85,8 @@ if __name__ == '__main__':
         old = f[start:start + r['len']]
         # raw: top bit = the camera applies the accent colour table first; the next one: the warning (red) table
         # instead; the one after: the level's (blue)
-        out[r['fn']].append([start, r['len'], fnv(old), len(enc) | slow << 31, fnv(enc), rawlen | (hu & 1) << 31 | (hu >> 1 & 1) << 30 | (hu >> 2 & 1) << 29, rn.hex(), r['id'], r['res']])
-        stats['ok'] += 1; stats['levels%d' % lv] += 1; stats['slow'] += slow; stats['hue'] += hu & 1; stats['red'] += hu >> 1 & 1; stats['blue'] += hu >> 2 & 1
+        out[r['fn']].append([start, r['len'], fnv(old), len(enc) | (slow & 1) << 31 | (slow >> 1) << 30, fnv(enc), rawlen | (hu & 1) << 31 | (hu >> 1 & 1) << 30 | (hu >> 2 & 1) << 29, rn.hex(), r['id'], r['res']])
+        stats['ok'] += 1; stats['levels%d' % lv] += 1; stats['slow'] += slow & 1; stats['medium'] += slow >> 1; stats['hue'] += hu & 1; stats['red'] += hu >> 1 & 1; stats['blue'] += hu >> 2 & 1
         stats['lettering' if r['h_'] in want else 'colour only'] += 1
         if lv == 4: print('4 levels:', r['fn'], hex(r['res']))
     for fn in FILES:

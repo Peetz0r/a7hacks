@@ -5,7 +5,8 @@
  * LZ77 (uxclz.c), unpacked by the camera's hardware straight into the GPU's layout (RGBA4444 in 8x8 tiles).
  * picpatch.h (made by font/pics/mkpics.py and font/mkheader.py) has, per picture we change: where its data
  * area is and how long, a hash of the original data, the length and hash of the new data (top bit of the
- * length: packed the slow, cheapest way; otherwise the quick way, which is most of them), the size unpacked,
+ * length: packed the slow, cheapest way; the next one: the medium way; otherwise the quick way, which is most
+ * of them), the size unpacked,
  * and our pixels: only the ones we drew (Comic Relief lettering, and what we cleared around the old one), as
  * runs (u16 skip, u16 count, the pixels; ending with 0, 0), themselves packed with the same LZ77. Pictures
  * in Sony's orange accent are marked (top bit of _raw): their colours go through pic_hue (the accent in another
@@ -33,6 +34,8 @@ static u8 pok[NPP][PIC_MAXCOUNT];        /* pictures found ours (their pages are
                                             while the rest are being done */
 static u8 pbuf[PIC_MAXRAW + 16], pout[PIC_MAXRAW + PIC_MAXRAW / 8 + 4096], prun[PIC_MAXRUNS + 16];
 static int picflush;                     /* the label store also gives up its copies of the pictures we change */
+/* how a picture is packed, from its _nlen: top bit the cheapest way, the next one the medium way, else quick */
+#define PIC_HOW(nl) ((nl) >> 31 ? LZ_CHEAPEST : (nl) >> 30 & 1 ? LZ_MEDIUM : LZ_QUICK)
 
 static u32 pfnv(const u8 *p, u32 n) { u32 h = 0x811c9dc5u; for (u32 i = 0; i < n; i++) h = (h ^ p[i]) * 0x01000193u; return h; }
 static void picunmap(int k) { if (pps[k].map) sc(SYS_MUNMAP, (long)pps[k].map, pps[k].size, 0, 0, 0); pps[k].map = 0; }
@@ -59,7 +62,7 @@ static int picmap(int k, int lock) {
 static int picstate(int k, int i) {
     const struct pp *P = &pps[k];
     const u8 *p = P->map + P->off[i];
-    u32 n = P->nlen[i] & 0x7fffffffu, z = 1;
+    u32 n = P->nlen[i] & 0x3fffffffu, z = 1;
     for (u32 j = n; j < P->len[i]; j++) if (p[j]) { z = 0; break; }
     if (z && pfnv(p, n) == P->nhash[i]) return 1;
     if (pfnv(p, P->len[i]) == P->old[i]) return 0;
@@ -90,8 +93,8 @@ static int picset(int k, int i) {
         if ((pos + cnt) * 2 > raw || q + 2 * cnt > qe) return -1;
         for (u32 j = 0; j < cnt; j++, pos++, q += 2) { pbuf[2 * pos] = q[0]; pbuf[2 * pos + 1] = q[1]; }
     }
-    int n = lz_encode(pbuf, (int)raw, pout, !(P->nlen[i] >> 31));      /* top bit: packed the cheapest way */
-    if ((u32)n != (P->nlen[i] & 0x7fffffffu) || pfnv(pout, (u32)n) != P->nhash[i]) return -1;
+    int n = lz_encode(pbuf, (int)raw, pout, PIC_HOW(P->nlen[i]));
+    if ((u32)n != (P->nlen[i] & 0x3fffffffu) || pfnv(pout, (u32)n) != P->nhash[i]) return -1;
     u32 va = (u32)(unsigned long)(P->map + P->off[i]);
     hold(1);                                   /* a stop waits until the picture is written whole */
     if (vrw(mypid, va, pout, n, 1) <= 0) { hold(0); return -2; }

@@ -1512,7 +1512,7 @@ static int bench(void) {
                 }
             }
             u32 d = usnow();
-            int m = lz_encode(pbuf, (int)raw, pout, !(P->nlen[i] >> 31));
+            int m = lz_encode(pbuf, (int)raw, pout, PIC_HOW(P->nlen[i]));
             u32 e = usnow();
             volatile u32 h = pfnv(pout, (u32)m) ^ pfnv(P->map + P->off[i], P->len[i]); (void)h;
             u32 f = usnow();

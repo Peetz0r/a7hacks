@@ -32,7 +32,7 @@ Scripts
               soft shadow as the original, measured from it
   mkpics.py   builds image_*.uxc.pics.json: per picture, only the pixels we drew (in the camera's order),
               the length and hash of the new picture packed by ../../uxclz.c (quick mode where it fits,
-              else the cheapest), and a hash of the original; Sony's own pixels are not in it
+              else medium (a longer search), else the cheapest), and a hash of the original; Sony's own pixels are not in it
   mkpicheader.py  turns those into ../../picpatch.h for a7hacks.c (the font patcher unpacks the original from the file in RAM,
               puts our pixels in, packs it and writes it only if length and hash come out as computed here)
   overrides.py  lines whose reading is settled another way, used by mkpics: a person's reading from the

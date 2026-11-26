@@ -8,6 +8,7 @@ import android.os.SystemClock;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.util.Arrays;
 import java.util.TreeMap;
 
 public class StartService extends Service {
@@ -141,6 +142,9 @@ public class StartService extends Service {
         }
         return true;
     }
+
+    /** "3 min 33 s", "41 s" */
+    static String took(int s) { return (s >= 60 ? s / 60 + " min " : "") + s % 60 + " s"; }
 
     /** Keeps the root sampler running and the camera's lens info up to date. Runs for as long as the process lives. */
     static void supervise(final Context ctx) {
@@ -309,12 +313,10 @@ public class StartService extends Service {
                 // the pictures (and the accent colour) once they're all in: "pN" (while they're still being
                 // done it reads "pN/T", which the screen shows as progress)
                 if (ft != null && ft.startsWith("on ")) {
-                    String took = "";              // "sS": how long the patcher took to get it all in
+                    String took = "";              // "sS": how long the patcher took to get the pictures in
                     for (String w : ft.split(" "))
-                        if (w.length() > 1 && w.charAt(0) == 's' && Character.isDigit(w.charAt(1))) {
-                            int n = Integer.parseInt(w.substring(1));
-                            took = " (in " + (n >= 60 ? n / 60 + " min " : "") + n % 60 + " s)";
-                        }
+                        if (w.length() > 1 && w.charAt(0) == 's' && Character.isDigit(w.charAt(1)))
+                            took = " (in " + took(Integer.parseInt(w.substring(1))) + ")";
                     for (String w : ft.split(" ")) {
                         if (w.length() > 1 && w.charAt(0) == 'p' && Character.isDigit(w.charAt(1)) && w.indexOf('/') < 0
                                 && !w.equals(picturesLogged)) {
@@ -336,16 +338,20 @@ public class StartService extends Service {
                             // each possibly followed by "noicons" (the icon font isn't the one this was made for)
                             String[] f = ft.split(" ");
                             String c = f.length > 2 ? f[2] : "";
-                            if (ft.endsWith(" noicons"))
+                            String fin = "";       // "fF": seconds the patcher took to get the font in
+                            for (String w : f)
+                                if (w.length() > 1 && w.charAt(0) == 'f' && Character.isDigit(w.charAt(1)))
+                                    fin = ", in " + took(Integer.parseInt(w.substring(1)));
+                            if (Arrays.asList(f).contains("noicons"))
                                 AppLog.add("icons: keeping their own lettering (the icon font isn't the one this was made for)");
                             if (c.equals("nocache"))
                                 AppLog.add("menu font: Comic Relief (the camera's character cache wasn't found, so the"
-                                    + " characters it had already drawn stay in Univers)");
+                                    + " characters it had already drawn stay in Univers" + fin + ")");
                             else if (c.startsWith("c") && !c.equals("c0"))
                                 AppLog.add("menu font: Comic Relief (" + c.substring(1)
-                                    + " characters the camera had kept from Univers get drawn again)");
+                                    + " characters the camera had kept from Univers get drawn again" + fin + ")");
                             else
-                                AppLog.add("menu font: Comic Relief");
+                                AppLog.add("menu font: Comic Relief" + (fin.length() > 0 ? " (" + fin.substring(2) + ")" : ""));
                             // then "tK" (K labels the camera had kept as pictures get drawn again when next shown)
                             // or "nolabels" (that store wasn't found)
                             for (String w : f) {

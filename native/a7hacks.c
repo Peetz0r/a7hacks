@@ -76,8 +76,8 @@
  * color_cmn.uxc, style_cmn.uxc). --text-only leaves the icons, pictures and colours alone, and so does the patcher for a file
  * that isn't exactly the one this was made for (status gets "noicons" / "nopics"). Status (on N [cM | nocache]
  * [tK | nolabels] [pP[/T] | nopics] [aA] [noicons] | partial N/M [pP/T] | off [pics] | badfile | error ...; M = cached
- * characters marked; P/T: pictures done of how many, while they are still being done; sS: seconds from the
- * patcher's start until all of it was in) goes to
+ * characters marked; P/T: pictures done of how many, while they are still being done; fF, sS: seconds from the
+ * patcher's start until the font, and the pictures, were all in) goes to
  * /android/dev/a7hacks.ft. A stop (SIGTERM, the app's Restart) is held off while
  * the patcher writes, so nothing is left half written.
  *
@@ -1537,7 +1537,7 @@ static u32 secs(void) {
     return (u32)ts[0];
 #endif
 }
-static u32 tookt = 0;                 /* seconds the patcher took to get everything in (0: not yet) */
+static u32 tookf, tookp;              /* seconds the patcher took to get the font, the pictures in (0: not yet) */
 
 static void ftreport(char *st, char *last, int left, int done, int total, int cache, int labels, int pics,
                      u32 pdone, int pleft, int acc, int icons, int noicons) {
@@ -1558,7 +1558,8 @@ static void ftreport(char *st, char *last, int left, int done, int total, int ca
         else if (icons) k = scat(st, k, " nopics");
         if (pics && texd >= 0) { k = scat(st, k, " g"); k = scatn(st, k, (u32)(texd + (texe > 0 ? texe : 0))); }
         if (noicons && icons) k = scat(st, k, " noicons");
-        if (tookt) { k = scat(st, k, " s"); k = scatn(st, k, tookt); }
+        if (tookf) { k = scat(st, k, " f"); k = scatn(st, k, tookf); }
+        if (tookp) { k = scat(st, k, " s"); k = scatn(st, k, tookp); }
     }
     int changed = 0;
     for (int i = 0; ; i++) { if (st[i] != last[i]) { changed = 1; break; } if (!st[i]) break; }
@@ -1604,7 +1605,7 @@ static int font(int on, int icons) {
     int pics_state = 0;               /* 2: all our pictures are in */
     texd = -2; u32 texd2 = 0;         /* textures brought up to date (-2: not looked yet, -1: can't), next look */
     texe = -1;                        /* -1: the first pictures aren't all in yet */
-    u32 t0 = secs(); tookt = 0;       /* for the time it all takes (sS in the status) */
+    u32 t0 = secs(); tookf = tookp = 0;   /* for the time it takes (fF, sS in the status) */
     sc(SYS_NICE, 19, 0, 0, 0, 0);     /* the camera comes first: unpacking and packing pictures takes a while */
     char last[80]; last[0] = 0;
     int cache = -2;                  /* glyphs marked stale by the last flush; -1: no cache found; -2: none yet */
@@ -1618,7 +1619,9 @@ static int font(int on, int icons) {
             findwindows();
             for (int f = 0; f < NPF; f++) if (act[f]) for (int i = 0; i < pfs[f].count; i++) {
                 if (frange(f, i) == 1) continue;
-                if (crossesedge(f, i) && secs() - t0 < 120) continue;   /* waits up to 2 minutes for the UI to move on */
+                if (crossesedge(f, i) && secs() - t0 < 30) continue;    /* waits up to 30 s for the UI to move on (it
+                                                                            mostly does within seconds; a buffer that stays
+                                                                            put isn't being read from) */
                 if (fset(f, i) < 0) { ftstatus("error write"); out("error write"); return 2; }
                 done++; left--; wrote = 1;
             }
@@ -1651,7 +1654,8 @@ static int font(int on, int icons) {
             else if (secs() - fwt > 3600) nfwin = -1;         /* not within an hour: leave it */
         }
         if (nold && labels >= 0) labelflush(0);   /* the out-of-date labels that were in use: once they aren't */
-        if (!tookt && !left && (!pics || pics_state == 2)) { tookt = secs() - t0; if (!tookt) tookt = 1; }
+        if (!tookf && !left) { tookf = secs() - t0; if (!tookf) tookf = 1; }
+        if (!tookp && pics && pics_state == 2) { tookp = secs() - t0; if (!tookp) tookp = 1; }
         char st[80];
         ftreport(st, last, left, done, total, cache, labels, pics, pdone, pleft, acc, icons, noicons);
 #ifdef HOST

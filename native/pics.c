@@ -29,6 +29,8 @@ static struct pp {
 };
 #define NPP ((int)(sizeof pps / sizeof pps[0]))
 static u8 pbad[NPP][PIC_MAXCOUNT];       /* pictures that didn't come out as expected: left alone */
+static u8 pok[NPP][PIC_MAXCOUNT];        /* pictures found ours (their pages are locked, so they stay): not hashed again
+                                            while the rest are being done */
 static u8 pbuf[PIC_MAXRAW + 16], pout[PIC_MAXRAW + PIC_MAXRAW / 8 + 4096], prun[PIC_MAXRUNS + 16];
 static int picflush;                     /* the label store also gives up its copies of the pictures we change */
 
@@ -106,7 +108,7 @@ static int picsopen(void) {
     int n = 0;
     for (int k = 0; k < NPP; k++) {
         pps[k].on = 0;
-        for (int i = 0; i < pps[k].count; i++) pbad[k][i] = 0;
+        for (int i = 0; i < pps[k].count; i++) pbad[k][i] = pok[k][i] = 0;
         if (picmap(k, 1) < 0) continue;
         int ok = 1;
         for (int i = 0; ok && i < pps[k].count; i++) if (picstate(k, i) < 0) ok = 0;
@@ -115,20 +117,25 @@ static int picsopen(void) {
     return n;
 }
 /* puts our pictures in place where they aren't yet, at most budget of them this time: how many are ours;
- * *left: how many still to do */
+ * *left: how many still to do. Hashing every picture each time cost more than the pictures themselves (15 MB,
+ * four times a second), so while there is a budget only the ones not known to be ours yet are looked at, and
+ * once the budget is spent the rest only counted; budget 0 (once all are in) looks at every one again. */
 static u32 picsdo(int budget, int *left) {
-    u32 done = 0; *left = 0;
+    u32 done = 0; *left = 0; int check = budget == 0;
     for (int k = 0; k < NPP; k++) {
         if (!pps[k].on) continue;
         for (int i = 0; i < pps[k].count; i++) {
             if (pbad[k][i]) continue;
+            if (pok[k][i] && !check) { done++; continue; }
+            if (!check && budget <= 0) { (*left)++; continue; }
             int st = picstate(k, i);
+            pok[k][i] = st == 1;
             if (st == 1) { done++; continue; }
             if (st < 0) { pbad[k][i] = 1; continue; }
             if (budget <= 0) { (*left)++; continue; }
             budget--;
             int r = picset(k, i);
-            if (r == 0) done++; else pbad[k][i] = 1;
+            if (r == 0) { done++; pok[k][i] = 1; } else pbad[k][i] = 1;
         }
     }
     return done;

@@ -101,10 +101,13 @@ static int lz_block_quick(const unsigned char *s, int n, unsigned char *dst) {
         if (i + 2 < n) {
             int h = (s[i] << 4 ^ s[i + 1] << 2 ^ s[i + 2] * 7) & 4095;
             int c = lz_head[h];
+            int lim = n - i < 64 ? n - i : 64;
             for (int k = 0; c != 0xffff && k < LZ_QCHAIN; k++, c = lz_prev[c]) {
-                int m = 0, lim = n - i < 64 ? n - i : 64;
+                if (bl && s[c + bl] != s[i + bl]) continue;   /* can't be longer than the best so far: the same result,
+                                                                 without comparing it all */
+                int m = 0;
                 while (m < lim && s[c + m] == s[i + m]) m++;
-                if (m > bl) { bl = m; bd = i - c; if (m == 64) break; }
+                if (m > bl) { bl = m; bd = i - c; if (m == lim) break; }
             }
         }
         int step = 1;

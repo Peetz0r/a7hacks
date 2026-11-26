@@ -17,6 +17,7 @@
  *   liba7hacks.so --version                       when this helper was built (UTC)
  *   liba7hacks.so --memory-dump path [--all]      copy the UI's own data to path (for study elsewhere;
  *                                                 --all: and the driver memory it has mapped, RAM pages only)
+ *   liba7hacks.so --screenshot path               Sony's own screen (its OSD, not the live view) to path as a PNG
  *   liba7hacks.so --glyph-cache [--mark-stale | --list] [--all]
  *                                                 UI font: show the UI's glyph cache (--mark-stale: and mark it
  *                                                 stale; --list: and list, with pictures, the glyphs drawn since;
@@ -1148,6 +1149,95 @@ static int memdump(const char *path, int dev) {
     return 0;
 }
 
+/* --screenshot path: Sony's own screen as a PNG (RGBA, 640x480). That is the OSD the UI (im.elf) draws over the
+ * live view, with its transparency; not the live view itself (no Linux process has it) and not Android (that's
+ * screencap's). The UI draws it into two buffers in /dev/stream, double buffered: its two mappings of exactly
+ * 640x480 x 16 bits, RGBA4444, rows top down. Which of the two is on screen isn't known, but once the screen has
+ * settled both hold the same frame, so they're compared (up to 20 times, 50 ms apart) until they agree; if they
+ * never do (something blinking), the first one is written anyway and the answer says so. Read only: /dev/mem is
+ * opened read only, and only those two buffers, in RAM, are read. The PNG is written row by row (deflate's
+ * "stored" blocks, uncompressed: ~1.2 MB), so it needs no big buffers. */
+#define OSDW 640
+#define OSDH 480
+#define OSDLEN (OSDW * OSDH * 2)
+static u32 crctab[256];
+static u32 crc(u32 c, const u8 *p, int n) {
+    if (!crctab[1]) for (u32 i = 0; i < 256; i++) { u32 v = i; for (int k = 0; k < 8; k++) v = v & 1 ? 0xedb88320u ^ v >> 1 : v >> 1; crctab[i] = v; }
+    c = ~c; for (int i = 0; i < n; i++) c = crctab[(c ^ p[i]) & 255] ^ c >> 8; return ~c;
+}
+static void be32(u8 *p, u32 v) { p[0] = v >> 24; p[1] = v >> 16; p[2] = v >> 8; p[3] = v; }
+/* one PNG chunk: length, type, data, CRC of type and data; 0 if written */
+static int chunk(int o, const char *type, const u8 *d, int n) {
+    u8 h[8]; be32(h, (u32)n); for (int i = 0; i < 4; i++) h[4 + i] = (u8)type[i];
+    u8 t[4]; be32(t, crc(crc(0, h + 4, 4), d, n));
+    return sc(SYS_WRITE, o, (long)h, 8, 0, 0) == 8 && (!n || sc(SYS_WRITE, o, (long)d, n, 0, 0) == n) &&
+           sc(SYS_WRITE, o, (long)t, 4, 0, 0) == 4 ? 0 : -1;
+}
+static u8 rowa[OSDW * 2], rowb[OSDW * 2], prow[2 + 5 + 1 + OSDW * 4 + 4];
+/* the pixels in which the two buffers differ (read now); -1 if they can't be read */
+static int osddiff(u32 a, u32 b) {
+    int n = 0;
+    for (int y = 0; y < OSDH; y++) {
+        if (pread_(a + y * OSDW * 2, rowa, OSDW * 2) < 0 || pread_(b + y * OSDW * 2, rowb, OSDW * 2) < 0) return -1;
+        for (int x = 0; x < OSDW * 2; x += 2) if (rowa[x] != rowb[x] || rowa[x + 1] != rowb[x + 1]) n++;
+    }
+    return n;
+}
+static int screenshot(const char *path) {
+    fd = sc(SYS_OPEN, (long)"/dev/mem", 0, 0, 0, 0);
+    if (fd < 0) { out("error open /dev/mem"); return 2; }
+    findprocs(0);
+    if (!np_) { out("noui"); return 1; }
+    nst = 0; wantstream = 1; int r = readmaps(plist[0]); wantstream = 0;
+    if (r < 0) { out("error maps"); return 2; }
+    u32 buf[2]; int nb = 0;
+    for (int k = 0; k < nst; k++) if (stlen[k] == OSDLEN && nb < 3) { if (nb < 2) buf[nb] = stpa[k]; nb++; }
+    if (nb != 2) { out("error "); outn((u32)nb); out(" OSD buffers"); return 2; }
+    for (int k = 0; k < 2; k++)
+        if ((buf[k] & 4095) || (u32)(buf[k] - RAM_LO) >= RAM_SIZE || RAM_SIZE - (buf[k] - RAM_LO) < OSDLEN) { out("error OSD buffer not in RAM"); return 2; }
+    int d = 0, tries = 0;
+    while (tries < 20) {
+        tries++;
+        if ((d = osddiff(buf[0], buf[1])) < 0) { out("error read"); return 2; }
+        if (!d) break;
+        long ts[2] = {0, 50000000};
+        sc(SYS_NANOSLEEP, (long)ts, 0, 0, 0, 0);
+    }
+    int o = sc(SYS_OPEN, (long)path, 01 | 0100 | 01000, 0644, 0, 0);
+    if (o < 0) { out("error open output"); return 2; }
+    static const u8 sig[8] = {0x89, 'P', 'N', 'G', 13, 10, 26, 10};
+    u8 ih[13]; be32(ih, OSDW); be32(ih + 4, OSDH); ih[8] = 8; ih[9] = 6; ih[10] = ih[11] = ih[12] = 0;   /* 8 bits, RGBA */
+    int bad = sc(SYS_WRITE, o, (long)sig, 8, 0, 0) != 8 || chunk(o, "IHDR", ih, 13) < 0;
+    u32 s1 = 1, s2 = 0;            /* Adler-32 of the image data */
+    int changed = 0;
+    for (int y = 0; y < OSDH && !bad; y++) {
+        /* one IDAT per row: (the zlib header,) a stored block of the row (filter byte 0, then RGBA), (the Adler-32) */
+        int n = 0;
+        if (!y) { prow[n++] = 0x78; prow[n++] = 0x01; }
+        int len = 1 + OSDW * 4;
+        prow[n++] = y == OSDH - 1; prow[n++] = len; prow[n++] = len >> 8; prow[n++] = ~len; prow[n++] = ~len >> 8;
+        if (pread_(buf[0] + y * OSDW * 2, rowa, OSDW * 2) < 0 || pread_(buf[1] + y * OSDW * 2, rowb, OSDW * 2) < 0) { bad = 1; break; }
+        u8 *q = prow + n; *q++ = 0;
+        for (int x = 0; x < OSDW * 2; x += 2) {
+            u32 v = rowa[x] | rowa[x + 1] << 8;
+            if (!d && (rowa[x] != rowb[x] || rowa[x + 1] != rowb[x + 1])) changed++;
+            *q++ = (u8)((v >> 12 & 15) * 17); *q++ = (u8)((v >> 8 & 15) * 17); *q++ = (u8)((v >> 4 & 15) * 17); *q++ = (u8)((v & 15) * 17);
+        }
+        for (u8 *c = prow + n; c < q; c++) { s1 = (s1 + *c) % 65521; s2 = (s2 + s1) % 65521; }
+        n = (int)(q - prow);
+        if (y == OSDH - 1) { be32(prow + n, s2 << 16 | s1); n += 4; }
+        if (chunk(o, "IDAT", prow, n) < 0) bad = 1;
+    }
+    if (!bad && chunk(o, "IEND", 0, 0) < 0) bad = 1;
+    sc(SYS_CLOSE, o, 0, 0, 0, 0);
+    if (bad) { out("error write"); return 2; }
+    out("written "); out(path);
+    if (d) { out(" (the buffers never agreed: "); outn((u32)d); out(" pixels differ; this is the first one, "); outx(buf[0]); out(")"); }
+    else if (changed) { out(" (the screen changed while writing: "); outn((u32)changed); out(" pixels)"); }
+    else { out(" ("); outn((u32)tries); out(tries == 1 ? " look)" : " looks)"); }
+    return 0;
+}
+
 /* --glyph-cache --list: lists the cached glyphs that aren't stale (drawn since the last --glyph-cache --mark-stale / --font-patcher), with their font's name and a
  * picture of each, straight to stdout. A glyph image: +24 width, +26 height, +28 bytes per row, +32 bits per
  * pixel, the pixels from +36; a scaled font's first word points at its font, whose first word points at its name */
@@ -1559,6 +1649,7 @@ static int run(int argc, char **argv) {
     if (eq(o, "--font-patcher") && (argc == 2 || (argc == 3 && eq(o2, "--text-only")))) return font(1, argc == 2);
     if (argc == 2 && eq(o, "--font-restore")) return font(0, 1);
     if (argc == 2 && eq(o, "--set-clock")) return setclock();
+    if (argc == 3 && eq(o, "--screenshot")) return screenshot(argv[2]);
     if (eq(o, "--memory-dump") && (argc == 3 || (argc == 4 && eq(argv[3], "--all")))) return memdump(argv[2], argc == 4);
     if (eq(o, "--glyph-cache")) {
         int mode = 0;

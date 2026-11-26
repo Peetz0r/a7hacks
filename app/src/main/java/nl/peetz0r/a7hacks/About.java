@@ -2,10 +2,13 @@ package nl.peetz0r.a7hacks;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Paint;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TableLayout;
 import android.widget.TableRow;
@@ -28,6 +31,8 @@ final class About {
     private static final int LINK = 0xFF33B5E5;     // Holo blue (android.R.color.holo_blue_light), as a link
     private static final Pattern VERSION = Pattern.compile("built (\\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d:\\d\\d) UTC");
     private static final String PATTERN = "yyyy-MM-dd HH:mm:ss";
+    private static final int MODULE = 3;            // px per QR module
+    private static final int QUIET = 2;             // white modules around it
     private static volatile String helperBuilt;     // UTC, once found ("unknown" if not)
 
     private About() {}
@@ -76,11 +81,22 @@ final class About {
         op.gravity = Gravity.CENTER_HORIZONTAL;
         op.topMargin = 16;
 
+        LinearLayout text = new LinearLayout(a);
+        text.setOrientation(LinearLayout.VERTICAL);
+        text.addView(table);
+        text.addView(link);
+        LinearLayout top = new LinearLayout(a);     // the times and the link, the QR code at their right
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.addView(text);
+        LinearLayout.LayoutParams qp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT);
+        qp.leftMargin = 64;
+        top.addView(qr(a), qp);
+
         LinearLayout box = new LinearLayout(a);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(24, 16, 24, 16);
-        box.addView(table);
-        box.addView(link);
+        box.addView(top);
         box.addView(ok, op);
 
         final AlertDialog d = new AlertDialog.Builder(a)
@@ -93,6 +109,20 @@ final class About {
         });
         d.show();
         ok.requestFocus();
+    }
+
+    /** the link as a QR code: res/drawable-nodpi/qr.png has one pixel per module (made with
+     *  zint -b QRCODE --scale=0.5 --border=0 -d 'https://peetz0r.nl/a7hacks'), enlarged here without filtering
+     *  (sharp edges), on white with a quiet zone */
+    private static View qr(Activity a) {
+        BitmapFactory.Options o = new BitmapFactory.Options();
+        o.inScaled = false;
+        Bitmap b = BitmapFactory.decodeResource(a.getResources(), R.drawable.qr, o);
+        ImageView v = new ImageView(a);
+        v.setImageBitmap(Bitmap.createScaledBitmap(b, b.getWidth() * MODULE, b.getHeight() * MODULE, false));
+        v.setBackgroundColor(0xFFFFFFFF);
+        v.setPadding(QUIET * MODULE, QUIET * MODULE, QUIET * MODULE, QUIET * MODULE);
+        return v;
     }
 
     private static TextView row(TableLayout table, String label, String value) {

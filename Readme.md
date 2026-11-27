@@ -20,6 +20,7 @@ When you use Aperture Priority mode with Auto-ISO, it should select a best shutt
 * Fix the system clock. Sony has built their own clock driver, but they left the system clock at 1970-01-01 00:01:05 (yes, not exactly 00:00)
 * Screenshot tool for the native UI (CLI for now, separate OSD and Live view).
 * 24h notation was only used with D-M-Y notation, is now also used with Y-M-D notation.
+* Ships with a recent timezone database (tzdata 2026f) and allows you to upgrade by putting TZDATA.TGZ on the SD card
 
 
 ## Customisations
@@ -31,13 +32,13 @@ Warning: these are silly, but they can be disabled
 Create a file `A7HACKS.INI` (the filename has to be all caps!) with the following contents on the SD card root:
 ```
 [config]
-font = on      # menu font in Comic Relief; off: the camera's own (Univers)
-icons = on     # lettering in the icons and pictures in Comic Relief (needs font = on)
+font = on                         # menu font in Comic Relief; off: the camera's own (Univers)
+icons = on                        # lettering in the icons and pictures in Comic Relief (needs font = on)
+timezone = Europe/Amsterdam       # your timezone, if you want automatic DST functionality
 
-# focal length of the lens, this has to be a value available in the menu
-[135]
-model = Yashica ML 135mm f/2.8
-aperture = 2.8
+[135]                             # focal length of the lens, this has to be a value available in the menu
+model = Yashica ML 135mm f/2.8    # name of the lens as it should appear in the EXIF field LensModel
+aperture = 2.8                    # widest aperture of the lens, appears in the EXIF field MaxApertureValue
 ```
 
 All settings are optional, the `[config]` settings default to `on`.

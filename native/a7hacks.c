@@ -56,13 +56,12 @@
  * memory once per boot (with O_DIRECT, so there's no page-cache copy). The label patcher finds that copy and
  * writes "Manual Focal Length" and "Custom" over the texts: the same lengths, so nothing else moves. A string
  * record is a u32 id, the text and a NUL; we only touch a complete record (id 0x1e04f85a or 0x1e04e566 + the
- * exact old text). The
- * UI's memory is reached via /proc/PID/pagemap (virtual -> physical) and /dev/mem; only that process's pages
- * are read, and only addresses in RAM. The UI only loads the menu strings when it needs them (the first time the
- * menu opens, say), so until both labels turn up the patcher looks every 2 s at just the memory the UI has newly
- * taken into use (pages that weren't there, or sat in another frame, at the previous look), and through all of
- * it every 10..60 s. Once found, it checks the copies it knows about every 2 s (and renames a fresh one again),
- * and looks for other copies every 5 minutes. Status (on N | waiting MB | noui | error ...) goes to
+ * exact old text). The UI's memory is reached via /proc/PID/pagemap (virtual -> physical) and /dev/mem; only
+ * that process's pages are read, and only addresses in RAM. The UI only loads the menu strings when it needs
+ * them (the first time the menu opens, say), so until both labels turn up the patcher looks every 10 s at just
+ * the memory the UI has newly taken into use (pages that weren't there, or sat in another frame, at the previous
+ * look), and through all of it after 10, 20, 40 ... s, then every 5 minutes. Once found, it checks the copies it
+ * knows about every 2 s (and renames a fresh one again), and looks for other copies every 5 minutes. Status (on N | waiting MB | noui | error ...) goes to
  * /android/dev/a7hacks.ui. --label-find does the search once without writing and lists what it found;
  * "--label-find --all" looks in every process.
  *
@@ -465,14 +464,16 @@ static void maps_line(const char *p, const char *end) {
     if (!(p = hexp(p, end, &s)) || p >= end || *p++ != '-') return;
     if (!(p = hexp(p, end, &e)) || p >= end || *p++ != ' ') return;
     if (end - p < 5 || p[4] != ' ') return;
-    char r = p[0], w = p[1]; p += 4;
+    char r = p[0], w = p[1], x = p[2]; p += 4;
     u32 pgo = 0;
     { const char *q = p; while (q < end && *q == ' ') q++; if (!hexp(q, end, &pgo)) pgo = 0; }
     for (int f = 0; f < 3; f++) { while (p < end && *p == ' ') p++; while (p < end && *p != ' ') p++; }
     while (p < end && *p == ' ') p++;
     int n = (int)(end - p);
     if (wantstream && n == 11 && starts(p, n, "/dev/stream") && nst < MAXSTREAM) { stpa[nst] = pgo; stlen[nst] = e - s; nst++; }
-    if (n >= 10 && starts(end - 10, 10, "/libObj.so")) isui = 1;
+    /* the UI runs libObj.so (mapped executable); our font patcher maps one page of it too (read only, for the
+     * peaking colour), and must not count: its memory holds our own label texts */
+    if (x == 'x' && n >= 10 && starts(end - 10, 10, "/libObj.so")) isui = 1;
     if (r != 'r' || e <= s) return;
     if (heaponly == 2 && n && starts(p, n, "/dev/")) {     /* M a: driver memory too (only pages in RAM get read) */
         if (nrng < MAXRNG) { rs[nrng] = s; rend[nrng] = e; nrng++; }
@@ -647,7 +648,7 @@ static int label(void) {
     fd = sc(SYS_OPEN, (long)"/dev/mem", 2, 0, 0, 0);
     if (fd < 0) { uistatus("error open /dev/mem"); out("error open /dev/mem"); return 2; }
     char last[40]; last[0] = 0;
-    u32 next = 0, wait = 5, mb = 0;        /* in 2 s ticks: search again after 10, 20, 40, 60, 60 ... s */
+    u32 next = 0, wait = 5, mb = 0;        /* in 2 s ticks: search again after 10, 20, 40, 80, 160, 300, 300 ... s */
     int procs = 0;
     for (u32 t = 0; ; t++) {
         if (t >= next) {
@@ -655,9 +656,11 @@ static int label(void) {
             mb = scanned >> 8;
             if (!procs) next = t + 5;                       /* no UI yet */
             else if (labsfound()) { next = t + 150; wait = 5; }   /* found: look for other copies every 5 minutes */
-            else { next = t + wait; wait = wait < 15 ? wait * 2 : 30; }
-        } else if (!labsfound() && np_ == 1 && readmaps(plist[0]) == 0 && isui) {
-            /* in between: look only at memory the UI has just taken into use (where newly loaded strings are) */
+            else { next = t + wait; wait = wait < 75 ? wait * 2 : 150; }
+        } else if (!labsfound() && t % 5 == 0 && np_ == 1 && readmaps(plist[0]) == 0 && isui) {
+            /* every 10 s in between: look only at memory the UI has just taken into use (where newly loaded strings
+             * are; the whole search, some 2.5 s of the CPU, backs off to every 5 minutes: it is for strings that land
+             * in pages the UI already had) */
             scanpid(plist[0], 0);
             if (labsfound()) { next = t + 150; wait = 5; }
         }
@@ -1751,7 +1754,7 @@ static int pktable(int pid, u32 va, u32 was) {       /* do the 8 records at va h
     }
     return 1;
 }
-static void pkfindui(u32 was) {
+static void pkfindui(u32 was, u32 now) {          /* the table holding was or (already) now */
     pkuipid = 0;
     findprocs(0);
     if (!np_) return;
@@ -1762,14 +1765,26 @@ static void pkfindui(u32 was) {
         for (u32 va = rs[k]; va < rend[k]; va += 4096) {
             u32 pa; if (v2p(pid, va, &pa) <= 0) continue;
             if (pread_(pa, pg + 32, 4096) < 0) continue;
-            for (int j = 32; j + 2 + 3 <= 32 + 4096; j++)
-                if (pg[j + 2] == (u8)(was >> 16) && pg[j + 3] == (u8)(was >> 8) && pg[j + 4] == (u8)was
-                    && pktable(pid, va + (u32)(j - 32), was)) { pkuipid = pid; pkuiva = va + (u32)(j - 32); return; }
+            u8 y0 = (u8)(was >> 16), y1 = (u8)(now >> 16);
+            for (int j = 32; j + 2 + 3 <= 32 + 4096; j++) {
+                u8 y = pg[j + 2];
+                if (y != y0 && y != y1) continue;         /* the quick test first: most bytes go no further */
+                for (int c = 0; c < 2; c++) {
+                    u32 v = c ? now : was;
+                    if (y == (u8)(v >> 16) && pg[j + 3] == (u8)(v >> 8) && pg[j + 4] == (u8)v
+                        && pktable(pid, va + (u32)(j - 32), v)) { pkuipid = pid; pkuiva = va + (u32)(j - 32); return; }
+                }
+            }
         }
 }
 static void pkshow(u32 was, u32 now, int full) {
-    if (!pkuipid || !pktable(pkuipid, pkuiva, was)) { pkuipid = 0; if (full) pkfindui(was); }
-    if (pkuipid) for (int i = 0; i < PKNREC; i++) {
+    /* the table we know holds the new colour already: nothing to look for (a sweep after the colour came in) */
+    int have = pkuipid && pktable(pkuipid, pkuiva, now);
+    if (!have && (!pkuipid || !pktable(pkuipid, pkuiva, was))) {
+        pkuipid = 0;
+        if (full) { pkfindui(was, now); have = pkuipid && pktable(pkuipid, pkuiva, now); }
+    }
+    if (!have && pkuipid) for (int i = 0; i < PKNREC; i++) {
         u8 w[3] = {(u8)(now >> 16), (u8)(now >> 8), (u8)now};
         hold(1); vrw(pkuipid, pkuiva + (u32)(i * PKREC) + 2, w, 3, 1); hold(0);
     }

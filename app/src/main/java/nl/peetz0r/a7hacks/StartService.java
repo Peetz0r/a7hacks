@@ -224,13 +224,6 @@ public class StartService extends Service {
                     try { Thread.sleep(1000); } catch (InterruptedException e) { return; }
                     continue;
                 }
-                String tzw = timezoneWanted;
-                if (!summerConfigured || (tzw == null ? summerZone != null : !tzw.equals(summerZone))) {
-                    summer.configure(tzw);
-                    summerZone = tzw;
-                    summerConfigured = true;
-                    summer.card();
-                } else if (cardBack) summer.card();
                 // 0. the clock: Linux's clock from the camera's own, now and then every minute (it stands still
                 //    while the camera sleeps); the answer comes a moment later
                 if (SystemClock.elapsedRealtime() - lastClockTry > 60000) {
@@ -429,7 +422,16 @@ public class StartService extends Service {
                 }
                 // 2. the lens info
                 writer.tick(SystemClock.elapsedRealtime());
-                // 3. summer time (A7HACKS.INI timezone): once a minute, once Linux's clock is the camera's
+                // 3. summer time (A7HACKS.INI timezone): set up after everything above has started (reading the
+                //    built-in tzdata takes the camera some 17 s, which held up the patchers at a cold boot), then
+                //    once a minute, once Linux's clock is the camera's
+                String tzw = timezoneWanted;
+                if (!summerConfigured || (tzw == null ? summerZone != null : !tzw.equals(summerZone))) {
+                    summer.configure(tzw);
+                    summerZone = tzw;
+                    summerConfigured = true;
+                    summer.card();
+                } else if (cardBack) summer.card();
                 if (clockOffset != null && SystemClock.elapsedRealtime() - lastSummerTry > 60000) {
                     lastSummerTry = SystemClock.elapsedRealtime();
                     if (summer.tick(clockOffset)) {            // read the clock again, and look again in 5 s

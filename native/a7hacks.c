@@ -1788,24 +1788,38 @@ static void pkshow(u32 was, u32 now, int full) {
 /* a new colour from the app: into the lookup (clock24), and onto the screen if it shows the one before */
 static int h24n;
 #define PKSONY 0x1d21092u                /* Sony's Yellow: Y 0xd2, Cb 0x10, Cr 0x92 */
-static u32 pkfirst, pkquiet;            /* the colour before a run of changes (for the full pass), quiet ticks */
+static u32 pkfirst, pkchg;              /* the colour before a run of changes (for the full pass), when it last changed */
+static u32 pkin_t;                      /* when ours came in (0: it isn't) */
 static void pkupdate(void) {
-    u32 was = pkin;
-    if (!pkread()) {                     /* the colour has stayed put a second: all of av-cam's data once */
-        if (pkfirst && ++pkquiet >= 4) {
-            u32 to = pkin ? pkin : PKSONY;
-            if (pkfirst != to) pkshow(pkfirst, to, 1);
-            pkfirst = 0;
+    u32 was = pkin, now = secs();
+    if (pkread()) {
+        h24n = clock24(1);
+        /* Sony's Yellow (only that menu colour gives it) stands for ours when ours comes in or goes */
+        u32 from = was ? was : PKSONY, to = pkin ? pkin : PKSONY;
+        if (from != to && (was || pkin)) {
+            pkshow(from, to, 0);
+            if (!pkfirst) pkfirst = from;
+            pkchg = now;
         }
+        pkin_t = pkin ? (was ? pkin_t : now) : 0;
+        if (pkin_t == 0 && pkin) pkin_t = 1;
         return;
     }
-    h24n = clock24(1);
-    /* Sony's Yellow (only that menu colour gives it) stands for ours when ours comes in or goes */
-    u32 from = was ? was : PKSONY, to = pkin ? pkin : PKSONY;
-    if (from != to && (was || pkin)) {
-        pkshow(from, to, 0);
-        if (!pkfirst) pkfirst = from;
-        pkquiet = 0;
+    if (pkfirst && now - pkchg >= 1) {   /* the colour has stayed put a second: all of av-cam's data, libObj's table */
+        u32 to = pkin ? pkin : PKSONY;
+        if (pkfirst != to) pkshow(pkfirst, to, 1);
+        pkfirst = 0;
+    }
+    /* Ours came in before the camera had set peaking up (at a cold boot: the helper starts before it does), so
+     * Sony's Yellow can turn up afterwards: for two minutes after, every 2 s, Sony's Yellow found in the register
+     * and av-cam's copies becomes ours (and libObj's table, a longer look, at 10, 30, 60 and 120 s) */
+    if (pkin && pkin_t && !pkfirst) {
+        u32 age = now - pkin_t;
+        static u32 last = 0xffffffffu;
+        if (age <= 120 && age != last && !(age & 1)) {
+            last = age;
+            pkshow(PKSONY, pkin, age == 10 || age == 30 || age == 60 || age == 120);
+        }
     }
 }
 static void ftreport(char *st, char *last, int left, int done, int total, int cache, int labels, int pics,

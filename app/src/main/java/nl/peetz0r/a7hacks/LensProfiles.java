@@ -12,7 +12,7 @@ import java.util.TreeMap;
 /**
  * Lens profiles, keyed by the SteadyShot focal length in mm. INI-style text file, A7HACKS.INI in the root of the SD card:
  *
- *   # lines starting with # are ignored
+ *   # a # starts a comment, on any line (also after a section or a value), so # can't be part of a value
  *   [135]
  *   model = Yashica ML 135mm f/2.8
  *   aperture = 2.8
@@ -46,8 +46,8 @@ public final class LensProfiles {
         Map<Integer, Profile> map = new HashMap<Integer, Profile>();
         Profile cur = null;
         for (String raw : text.split("\\r?\\n")) {
-            String line = raw.trim();
-            if (line.length() == 0 || line.startsWith("#")) continue;
+            String line = clean(raw);
+            if (line.length() == 0) continue;
             if (line.startsWith("[") && line.endsWith("]")) {
                 cur = null;
                 try {
@@ -72,13 +72,19 @@ public final class LensProfiles {
         return map;
     }
 
+    /** A line without its comment (from the first #) and the white space around what is left. */
+    static String clean(String raw) {
+        int hash = raw.indexOf('#');
+        return (hash >= 0 ? raw.substring(0, hash) : raw).trim();
+    }
+
     /** The keys of the [config] section (lower case), or an empty map. */
     public static Map<String, String> parseOptions(String text) {
         Map<String, String> map = new HashMap<String, String>();
         boolean in = false;
         for (String raw : text.split("\\r?\\n")) {
-            String line = raw.trim();
-            if (line.length() == 0 || line.startsWith("#")) continue;
+            String line = clean(raw);
+            if (line.length() == 0) continue;
             if (line.startsWith("[") && line.endsWith("]")) {
                 in = line.substring(1, line.length() - 1).trim().equalsIgnoreCase("config");
                 continue;
@@ -86,8 +92,6 @@ public final class LensProfiles {
             int eq = line.indexOf('=');
             if (!in || eq < 0) continue;
             String val = line.substring(eq + 1).trim();
-            int hash = val.indexOf('#');
-            if (hash >= 0) val = val.substring(0, hash).trim();
             map.put(line.substring(0, eq).trim().toLowerCase(), val);
         }
         return map;

@@ -22,9 +22,9 @@
  *   liba7hacks.so --reg-read addr n               n 32-bit hardware registers from addr on (read only)
  *   liba7hacks.so --mem-find hex start len        where a byte string is in physical RAM (read only)
  *   liba7hacks.so --ui-find hex                   where a byte string is in the UI's own data (read only)
- *   liba7hacks.so --screenshot [osd.png lv.png] both.png [--evf]
- *                                                 Sony's own screen as a PNG: its OSD over the live view (--evf:
- *                                                 placed as on the EVF); with three names also each on its own
+ *   liba7hacks.so --screenshot [osd.png lv.png] both.png
+ *                                                 Sony's own screen as a PNG: its OSD over the live view (LCD or
+ *                                                 EVF, as shown); with three names also each on its own
  *   liba7hacks.so --pic-census                    which of our pictures the UI has unpacked now (read only)
  *   liba7hacks.so --pic-bench                     time the picture patcher's steps on the camera (changes nothing)
  *   liba7hacks.so --glyph-cache [--mark-stale | --list] [--all]
@@ -1180,22 +1180,27 @@ static int memdump(const char *path, int dev) {
     return 0;
 }
 
-/* --screenshot [osd.png lv.png] both.png [--evf]: Sony's own screen as PNGs. both.png always; osd.png and
+/* --screenshot [osd.png lv.png] both.png: Sony's own screen as PNGs. both.png always; osd.png and
  * lv.png when three names are given.
  * osd.png (RGBA, 640x480) is the OSD the UI (im.elf) draws over the live view, with its transparency (Android
  * too, when an app is in front: it reaches the panel through the same buffers). The UI draws it into two buffers
- * in /dev/stream, double buffered: its two mappings of exactly 640x480 x 16 bits, RGBA4444, rows top down. Which
- * of the two is on screen isn't known, but once the screen has settled both hold the same frame, so they're
- * compared (for up to a second, 50 ms apart) until they agree; if they never do (something blinking), the first one
- * is written anyway and the answer says so.
+ * in /dev/stream, double buffered: its two mappings of exactly 640x480 x 16 bits, RGBA4444, rows top down. The one
+ * on screen is in the display register DREG_OSD (found and checked 2026-11-27: a mark in the other one doesn't
+ * show); the UI flips only when it redraws, so that one is copied in one go (~35 ms) and the register read again:
+ * if it flipped meanwhile, the new one is copied (at most 10 tries). If
+ * it names neither buffer, the old way: both are compared (for up to a second, 50 ms apart) until they agree; if they
+ * never do (something blinking), the first one is written anyway and the answer says so.
  * lv.png (RGB, 640x426) is the live view: no Linux process maps it. The image processor writes it, double
  * buffered, as UYVY (4:2:2, full range) at fixed physical addresses in the /dev/stream pool (LVA, LVB; found
- * 2026-11-26 by watching which memory changes, see --memory-changes), copied without tearing (lvgrab).
+ * 2026-11-26 by watching which memory changes, see --memory-changes). The panel itself shows another, compressed
+ * copy (2 buffers on the LCD at 30 frames a second, 3 in the EVF at 60), named by DREG_LV; each UYVY frame is
+ * written ~10 ms before the panel flips to its compressed twin (measured 2026-11-28), so at a flip the UYVY buffer written
+ * last is the frame on screen, and that one is copied (lvshown). Without flips (playback, menus): lvgrab.
  * both.png (RGB, 640x480) is the OSD over the live view, the way the panel shows it: the live view at the top on
- * the LCD, 27 rows down in the EVF (--evf; nothing tells us which one is on); black behind the OSD when the live
- * view isn't running (playback, Android). Peaking and zebra are in neither buffer (the display hardware adds them), so no PNG has them.
+ * the LCD, 27 rows down in the EVF (told by the flips: 60 a second); black behind the OSD when the
+ * live view isn't running (playback, Android). Peaking and zebra are in neither buffer (the display hardware adds them), so no PNG has them.
  * Read only: /dev/mem and /dev/stream are opened read only, and only those buffers, in RAM, are read. The PNGs
- * are written row by row (deflate's "stored" blocks, uncompressed), so only the live view needs a buffer. */
+ * are written row by row (deflate's "stored" blocks, uncompressed), so only the live view and the OSD copy need a buffer. */
 #define OSDW 640
 #define OSDH 480
 #define OSDLEN (OSDW * OSDH * 2)
@@ -1205,6 +1210,9 @@ static int memdump(const char *path, int dev) {
 #define LVA 0x93022000u
 #define LVB 0x930ed800u
 #define LVEVF 27                 /* the live view's first row on the EVF's screen */
+#define DREG_PAGE 0xf3441000u    /* display registers (read uncached, never written here) */
+#define DREG_LV 0x220            /* the compressed live view buffer the panel shows */
+#define DREG_OSD 0x320           /* the OSD buffer the panel shows */
 static u32 crctab[256];
 static u32 crc(u32 c, const u8 *p, int n) {
     if (!crctab[1]) for (u32 i = 0; i < 256; i++) { u32 v = i; for (int k = 0; k < 8; k++) v = v & 1 ? 0xedb88320u ^ v >> 1 : v >> 1; crctab[i] = v; }
@@ -1297,6 +1305,69 @@ static int lvgrab(void) {
     for (int k = 0; k < 2; k++) if ((unsigned long)m[k] < (unsigned long)-4095L) sc(SYS_MUNMAP, m[k], len, 0, 0, 0);
     return r;
 }
+/* The live view frame that's on screen into lvbuf: 1 done, 0 no whole frame in 500 ms, -1 can't map, 3 the panel
+ * didn't flip in 300 ms (no live view: use lvgrab). At each flip of DREG_LV, the UYVY buffer whose middle word
+ * changed last is the frame now shown: copied through a cached mapping of /dev/mem, kept when its middle word is
+ * still the same afterwards and 64 words spread over it, read uncached, match the copy (the EVF rewrites LVB ~7 ms
+ * after its flip: then the next flip is tried). *fast: the panel flips more often than every 25 ms (the EVF). */
+static int lvshown(int *fast) {
+    u32 base = LVA & ~0xfffu, len = (LVB + LVLEN - base + 0xfff) & ~0xfffu;
+    long m[2] = {-1, -1}, rm = -1;
+    int f = sc(SYS_OPEN, (long)"/dev/mem", 0x101000 /* O_RDONLY | O_SYNC */, 0, 0, 0);
+    if (f >= 0) {
+        m[0] = sc6(SYS_MMAP2, 0, len, 1, 1, f, (long)(base >> 12));
+        rm = sc6(SYS_MMAP2, 0, 0x1000, 1, 1, f, (long)(DREG_PAGE >> 12));
+        sc(SYS_CLOSE, f, 0, 0, 0, 0);
+    }
+    f = sc(SYS_OPEN, (long)"/dev/mem", 0, 0, 0, 0);          /* cached, for the copy */
+    if (f >= 0) { m[1] = sc6(SYS_MMAP2, 0, len, 1, 1, f, (long)(base >> 12)); sc(SYS_CLOSE, f, 0, 0, 0, 0); }
+    int r = -1; *fast = 0;
+    if ((unsigned long)m[0] < (unsigned long)-4095L && (unsigned long)m[1] < (unsigned long)-4095L && (unsigned long)rm < (unsigned long)-4095L) {
+        const volatile u32 *u[2] = {(const volatile u32 *)(m[0] + (LVA - base)), (const volatile u32 *)(m[0] + (LVB - base))};
+        const u32 *c[2] = {(const u32 *)(m[1] + (LVA - base)), (const u32 *)(m[1] + (LVB - base))};
+        const volatile u32 *reg = (const volatile u32 *)(rm + DREG_LV);
+        u32 mid[2] = {u[0][LVLEN / 8], u[1][LVLEN / 8]}, shown = *reg, t0 = usnow(), flipt = 0, flips = 0, short_ = 0;
+        int lastk = -1;
+        r = 0;
+        for (;;) {
+            u32 t = usnow() - t0;
+            if (t > 500000 || (!flips && t > 300000)) { if (!flips) r = 3; break; }
+            for (int k = 0; k < 2; k++) { u32 v = u[k][LVLEN / 8]; if (v != mid[k]) { mid[k] = v; lastk = k; } }
+            u32 v = *reg;
+            if (v == shown) continue;
+            shown = v; flips++;
+            if (flipt && t - flipt < 25000) short_++;
+            flipt = t;
+            if (lastk < 0) continue;                         /* no UYVY write seen yet: this flip's frame is unknown */
+            int k = lastk; u32 was = mid[k];
+            const u32 *src = c[k]; u32 *dst = (u32 *)lvbuf;
+            for (u32 i = 0; i < LVLEN / 4; i++) dst[i] = src[i];
+            int ok = u[k][LVLEN / 8] == was;
+            for (u32 i = 0; i < 64 && ok; i++) { u32 j = i * (LVLEN / 4 / 64) + i; if (u[k][j] != dst[j]) ok = 0; }
+            if (ok) { r = 1; break; }
+            mid[k] = u[k][LVLEN / 8];
+        }
+        *fast = short_ > 0;
+    }
+    if ((unsigned long)m[0] < (unsigned long)-4095L) sc(SYS_MUNMAP, m[0], len, 0, 0, 0);
+    if ((unsigned long)m[1] < (unsigned long)-4095L) sc(SYS_MUNMAP, m[1], len, 0, 0, 0);
+    if ((unsigned long)rm < (unsigned long)-4095L) sc(SYS_MUNMAP, rm, 0x1000, 0, 0, 0);
+    return r;
+}
+/* the shown OSD buffer, copied in one go (static, like lvbuf: the patchers running from this binary never touch it,
+ * so it only takes RAM during a --screenshot) */
+static u8 osdcopy[OSDLEN];
+/* the OSD buffer the panel shows (DREG_OSD), read uncached; 0 if it can't be read */
+static u32 osdshown(void) {
+    int f = sc(SYS_OPEN, (long)"/dev/mem", 0x101000 /* O_RDONLY | O_SYNC */, 0, 0, 0);
+    if (f < 0) return 0;
+    long rm = sc6(SYS_MMAP2, 0, 0x1000, 1, 1, f, (long)(DREG_PAGE >> 12));
+    sc(SYS_CLOSE, f, 0, 0, 0, 0);
+    if ((unsigned long)rm >= (unsigned long)-4095L) return 0;
+    u32 v = *(const volatile u32 *)(rm + DREG_OSD);
+    sc(SYS_MUNMAP, rm, 0x1000, 0, 0, 0);
+    return v;
+}
 static u8 clamp8(int v) { return (u8)(v < 0 ? 0 : v > 255 ? 255 : v); }
 /* live view pixel x of row y (in lvbuf) as RGB */
 static void lvrgb(int x, int y, u8 *q) {
@@ -1305,7 +1376,7 @@ static void lvrgb(int x, int y, u8 *q) {
     q[0] = clamp8(Y + (359 * v >> 8)); q[1] = clamp8(Y - ((88 * u + 183 * v) >> 8)); q[2] = clamp8(Y + (454 * u >> 8));
 }
 static int screenshot(int argc, char **argv) {
-    int evf = eq(argv[argc - 1], "--evf"), names = argc - 2 - evf;
+    int evf = 0, names = argc - 2;
     const char *path = names == 3 ? argv[2] : 0, *lvpath = names == 3 ? argv[3] : 0, *bothpath = argv[1 + names];
     fd = sc(SYS_OPEN, (long)"/dev/mem", 0, 0, 0, 0);
     if (fd < 0) { out("error open /dev/mem"); return 2; }
@@ -1318,33 +1389,51 @@ static int screenshot(int argc, char **argv) {
     if (nb != 2) { out("error "); outn((u32)nb); out(" OSD buffers"); return 2; }
     for (int k = 0; k < 2; k++)
         if ((buf[k] & 4095) || (u32)(buf[k] - RAM_LO) >= RAM_SIZE || RAM_SIZE - (buf[k] - RAM_LO) < OSDLEN) { out("error OSD buffer not in RAM"); return 2; }
-    int d = 0, tries = 0;
-    u32 t0 = usnow();
-    for (;;) {                                  /* a compare reads both buffers: ~150 ms */
-        tries++;
-        if ((d = osddiff(buf[0], buf[1])) < 0) { out("error read"); return 2; }
-        if (!d || usnow() - t0 > 1000000) break;
-        long ts[2] = {0, 50000000};
-        sc(SYS_NANOSLEEP, (long)ts, 0, 0, 0, 0);
+    int d = 0, tries = 0, byreg = 0;
+    u32 on = osdshown();
+    if (on == buf[0] || on == buf[1]) {         /* the one on screen, copied (~35 ms) while the UI doesn't flip */
+        u32 other = on == buf[0] ? buf[1] : buf[0];
+        for (tries = 1; tries <= 10; tries++) {
+            if (pread_(on, osdcopy, OSDLEN) < 0) { out("error read"); return 2; }
+            u32 now = osdshown();
+            if (now == on) { byreg = 1; break; }
+            if (now != buf[0] && now != buf[1]) break;
+            other = on; on = now;               /* it flipped: the new one */
+        }
+        if (byreg) { buf[0] = on; buf[1] = other; }
+    }
+    if (!byreg) {
+        tries = 0;
+        u32 t0 = usnow();
+        for (;;) {                              /* a compare reads both buffers: ~150 ms */
+            tries++;
+            if ((d = osddiff(buf[0], buf[1])) < 0) { out("error read"); return 2; }
+            if (!d || usnow() - t0 > 1000000) break;
+            long ts[2] = {0, 50000000};
+            sc(SYS_NANOSLEEP, (long)ts, 0, 0, 0, 0);
+        }
     }
     /* the live view: with three names it must be there; with one, an old or missing frame means black behind
      * the OSD (playback, menus over a stopped live view, Android) */
     if ((u32)(LVA - RAM_LO) >= RAM_SIZE || RAM_SIZE - (LVB - RAM_LO) < LVLEN) { out("error live view not in RAM"); return 2; }
-    int lv = lvgrab();
+    int fast = 0, lv = lvshown(&fast), lvexact = lv == 1;
+    if (lv == 3 || lv == 0) lv = lvgrab();                  /* no flips (no live view), or never a whole frame: the old way */
     if (lv == -1) { out("error map live view"); return 2; }
     if (!lv) { out("error live view: no whole frame (it changed while copied)"); return 2; }
     if (lvpath && lv == -2) { out("error no live view (the buffer was never written)"); return 2; }
     int bad = 0, changed = 0, o;
+    if (lvexact && fast) evf = 1;                       /* 60 flips a second: the EVF */
     out("written");
     /* the OSD */
     if (path) {
         if ((o = pngopen(path, OSDW, OSDH, 1)) < 0) { out(" error open output"); return 2; }
         for (int y = 0; y < OSDH && !bad; y++) {
-            if (pread_(buf[0] + y * OSDW * 2, rowa, OSDW * 2) < 0 || pread_(buf[1] + y * OSDW * 2, rowb, OSDW * 2) < 0) { bad = 1; break; }
+            if (byreg) { for (int i = 0; i < OSDW * 2; i++) rowa[i] = osdcopy[y * OSDW * 2 + i]; }
+            else if (pread_(buf[0] + y * OSDW * 2, rowa, OSDW * 2) < 0 || pread_(buf[1] + y * OSDW * 2, rowb, OSDW * 2) < 0) { bad = 1; break; }
             u8 *q = prow + PROWPIX;
             for (int x = 0; x < OSDW * 2; x += 2) {
                 u32 v = rowa[x] | rowa[x + 1] << 8;
-                if (!d && (rowa[x] != rowb[x] || rowa[x + 1] != rowb[x + 1])) changed++;
+                if (!d && !byreg && (rowa[x] != rowb[x] || rowa[x + 1] != rowb[x + 1])) changed++;
                 *q++ = (u8)((v >> 12 & 15) * 17); *q++ = (u8)((v >> 8 & 15) * 17); *q++ = (u8)((v >> 4 & 15) * 17); *q++ = (u8)((v & 15) * 17);
             }
             if (pngrow(o, OSDW * 4) < 0) bad = 1;
@@ -1366,11 +1455,12 @@ static int screenshot(int argc, char **argv) {
     if ((o = pngopen(bothpath, OSDW, OSDH, 0)) < 0) { out(" error open output"); return 2; }
     int top = evf ? LVEVF : 0, live = lv == 1 || (lv == 2 && lvpath);
     for (int y = 0; y < OSDH && !bad; y++) {
-        if (pread_(buf[0] + y * OSDW * 2, rowa, OSDW * 2) < 0 || (!path && pread_(buf[1] + y * OSDW * 2, rowb, OSDW * 2) < 0)) { bad = 1; break; }
+        if (byreg) { for (int i = 0; i < OSDW * 2; i++) rowa[i] = osdcopy[y * OSDW * 2 + i]; }
+        else if (pread_(buf[0] + y * OSDW * 2, rowa, OSDW * 2) < 0 || (!path && pread_(buf[1] + y * OSDW * 2, rowb, OSDW * 2) < 0)) { bad = 1; break; }
         u8 *q = prow + PROWPIX;
         for (int x = 0; x < OSDW; x++, q += 3) {
             u32 v = rowa[2 * x] | rowa[2 * x + 1] << 8, a = v & 15;
-            if (!path && !d && (rowa[2 * x] != rowb[2 * x] || rowa[2 * x + 1] != rowb[2 * x + 1])) changed++;
+            if (!path && !d && !byreg && (rowa[2 * x] != rowb[2 * x] || rowa[2 * x + 1] != rowb[2 * x + 1])) changed++;
             u8 l[3] = {0, 0, 0};
             if (live && y >= top && y < top + LVH) lvrgb(x, y - top, l);
             for (int c = 0; c < 3; c++) q[c] = (u8)(((v >> (12 - 4 * c) & 15) * 17 * a + l[c] * (15 - a)) / 15);
@@ -1379,9 +1469,11 @@ static int screenshot(int argc, char **argv) {
     }
     if (pngclose(o, bad) < 0) { out(" error write"); return 2; }
     out(" "); out(bothpath);
-    if (d) { out(" (the OSD buffers never agreed: "); outn((u32)d); out(" pixels differ; this is the first one, "); outx(buf[0]); out(")"); }
+    if (byreg) { out(" (OSD: the one shown"); if (tries > 1) { out(", "); outn((u32)tries); out(" tries"); } out(")"); }
+    else if (d) { out(" (the OSD buffers never agreed: "); outn((u32)d); out(" pixels differ; this is the first one, "); outx(buf[0]); out(")"); }
     else if (changed) { out(" (the OSD changed while writing: "); outn((u32)changed); out(" pixels)"); }
     else { out(" ("); outn((u32)tries); out(tries == 1 ? " look)" : " looks)"); }
+    if (lvexact) out(fast ? " (live view: the frame shown, EVF)" : " (live view: the frame shown, LCD)");
     if (lv == 2) out(lvpath ? " (live view not running: an old frame)" : " (no live view running)");
     if (lv == -2) out(" (no live view)");
     return 0;
@@ -2250,7 +2342,7 @@ static int run(int argc, char **argv) {
     if (eq(o, "--font-patcher") && (argc == 2 || (argc == 3 && eq(o2, "--text-only")))) return font(1, argc == 2);
     if (argc == 2 && eq(o, "--font-restore")) return font(0, 1);
     if (argc == 2 && eq(o, "--set-clock")) return setclock();
-    if (eq(o, "--screenshot") && (argc == 3 || argc == 5 || ((argc == 4 || argc == 6) && eq(argv[argc - 1], "--evf")))) return screenshot(argc, argv);
+    if (eq(o, "--screenshot") && (argc == 3 || argc == 5)) return screenshot(argc, argv);
     if (argc == 2 && eq(o, "--pic-census")) return census();
     if (argc == 2 && eq(o, "--pic-bench")) return bench();
     if (eq(o, "--memory-dump") && (argc == 3 || (argc == 4 && eq(argv[3], "--all")))) return memdump(argv[2], argc == 4);

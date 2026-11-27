@@ -4,7 +4,8 @@
  * Usage (as root):
  *   liba7hacks.so --lens-write id 0               manual lens EXIF info off (the camera behaves as without us)
  *   liba7hacks.so --lens-write id 1 fnum fden anum aden mnum mden [namehex]
- *       focal length fnum/fden, F-number anum/aden, minimum F-number (MaxApertureValue) mnum/mden,
+ *       focal length fnum/fden, F-number anum/aden, widest aperture as an APEX value (2 log2 N, EXIF
+ *       MaxApertureValue: the camera copies it as it is) mnum/mden,
  *       lens name as hex bytes (at most 64). Numbers are decimal.
  *   liba7hacks.so --lens-read id                  show the block
  *   liba7hacks.so --exposure-patcher              run forever: exposure focal length (see below)

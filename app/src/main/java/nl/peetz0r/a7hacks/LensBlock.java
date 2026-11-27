@@ -4,9 +4,10 @@ import java.io.UnsupportedEncodingException;
 
 /**
  * What goes into the camera's "manual lens EXIF info" block, as arguments for liba7hacks.so --lens-write:
- * "1 focalNum focalDen fNum fDen fMinNum fMinDen nameHex", or "0" to switch the block off.
+ * "1 focalNum focalDen fNum fDen maxApNum maxApDen nameHex", or "0" to switch the block off.
  * The camera turns this into EXIF FocalLength, FocalLengthIn35mmFilm, LensModel, MaxApertureValue and
- * FNumber (always 0 here: the aperture ring of an adapted lens is unknown). Pure Java.
+ * FNumber (always 0 here: the aperture ring of an adapted lens is unknown). It copies maxAp into MaxApertureValue
+ * as it is, and that tag is an APEX value (2 log2 N), not an F-number: f/2.8 goes in as 297/100. Pure Java.
  */
 public final class LensBlock {
     public static final String OFF = "0";
@@ -21,7 +22,7 @@ public final class LensBlock {
     public static String args(int mm, LensProfiles.Profile p, int maxNameBytes) {
         StringBuilder sb = new StringBuilder("1 ");
         sb.append(mm * 10).append(" 10 0 1 ");
-        if (p != null && p.aperture > 0) sb.append(fraction(p.aperture));
+        if (p != null && p.aperture > 0) sb.append(apex(p.aperture));
         else sb.append("0 1");
         String name = p != null && p.model != null ? p.model : NO_NAME;
         String hex = hex(clip(name, Math.min(MAX_NAME, maxNameBytes)));
@@ -29,11 +30,11 @@ public final class LensBlock {
         return sb.toString();
     }
 
-    /** "2.8" -> "28 10", "1.25" -> "125 100", "4" -> "40 10". */
-    static String fraction(double v) {
-        long tenth = Math.round(v * 10);
-        if (Math.abs(v * 10 - tenth) < 1e-6) return tenth + " 10";
-        return Math.round(v * 100) + " 100";
+    /** An F-number as an APEX aperture value (2 log2 N) in hundredths, as cameras write MaxApertureValue:
+     *  2.8 -> "297 100", 1.4 -> "97 100", 4 -> "400 100". Below f/1 it would be negative: 0 then. */
+    static String apex(double n) {
+        long v = Math.round(200 * Math.log(n) / Math.log(2));
+        return Math.max(0, v) + " 100";
     }
 
     /** The UTF-8 bytes of s, at most max bytes, never cutting a character in half. */

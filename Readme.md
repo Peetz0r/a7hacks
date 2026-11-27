@@ -17,10 +17,13 @@ When you use Aperture Priority mode with Auto-ISO, it should select a best shutt
 * Feed that setting into the logic for the exposure calculations
 * Display that setting in place of the (unknown) aperture on the live view
 * Keep a list of lenses in a file on the SD card, and look up not just the focal length but also the name and widest aperture for that lens, and let the camera write that to the EXIF data.
-* Fix the system clock. Sony has built their own clock driver, but they left the system clock at 1970-01-01 00:01:05 (yes, not exactly 00:00)
+* Fix the system clock. Sony has built their own clock driver, but they left the system clock at 1970-01-01 00:01:05 (yes, not exactly 00:00).
+    + The system clock isn't used for anything, but it's nice to have it correct anyway.
 * Screenshot tool for the native UI (CLI for now, separate OSD and Live view).
 * 24h notation was only used with D-M-Y notation, is now also used with Y-M-D notation.
 * Ships with a recent timezone database (tzdata 2026f) and allows you to upgrade by putting TZDATA.TGZ on the SD card
+* Update the Level view to also have the Histogram on the same screen.
+	+ [People have](https://www.dpreview.com/forums/threads/a7i-evf-with-both-histogram-and-level.4822662/) [been asking](https://www.reddit.com/r/SonyAlpha/comments/vx4vjy/comment/n5l3lb5/) [for this ](https://ca.community.sony.com/s/question/0D54O00006v8fOQSAY/sony-a7-series-incorporate-histogram-and-level-on-same-screen?language=en_US) [across many](https://www.reddit.com/r/SonyAlpha/comments/1hnrdmb/level_and_hist_on_displayevf_with_a6700/) [Sony Alpha](https://www.dpreview.com/forums/threads/showing-both-level-and-histogram-in-viewfinder-for-a6400.4430248/#post-63143887) [models for](https://www.dpreview.com/forums/threads/a6500-histogram-and-level-at-same-time.4115862/) [14 years](https://www.dpreview.com/forums/threads/no-level-and-histogram-at-the-same-time-nex7.3234071/)!
 
 
 ## Customisations
@@ -41,7 +44,7 @@ model = Yashica ML 135mm f/2.8    # name of the lens as it should appear in the 
 aperture = 2.8                    # widest aperture of the lens, appears in the EXIF field MaxApertureValue
 ```
 
-All settings are optional, the `[config]` settings default to `on`.
+All settings are optional, the `[config]` settings default to `on`. Values cannot contain `#` anywhere.
 
 Note: you can't disable the color change separately from the icons.
 

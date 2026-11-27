@@ -317,6 +317,9 @@ static struct h24f { const char *path; u32 size, page, hash; const u8 *map; } h2
     {"/usr/lib/viewUnified2.so", 5317568u, 0x316000u, 0x95a0481du, 0},
     {"/usr/lib/viewUnified2.so", 5317568u, 0x30b000u, 0x4f4caeabu, 0},
     {"/usr/lib/viewUnified2.so", 5317568u, 0x48c000u, 0x39165da7u, 0},
+    {PICDIR "viewStlrec.uxc", 19504u, 0x1000u, 0x7061d7feu, 0},
+    {PICDIR "viewStlrec.uxc", 19504u, 0x3000u, 0xaf949fccu, 0},
+    {"/usr/lib/viewUnified2.so", 5317568u, 0x11f000u, 0x5a8e6b1eu, 0},
 };
 /* kind: H24 the time in 24 hours (always); IRIS_T, IRIS_W the focal length where live view says F-- (only with a
  * lens that tells no aperture: see irisfl below), IRIS_W a code word written at once; IRIS_S always Sony's (it was
@@ -325,6 +328,7 @@ static struct h24f { const char *path; u32 size, page, hash; const u8 *map; } h2
 #define IRIS_T 1
 #define IRIS_S 2
 #define IRIS_W 3
+#define LAY 4
 static const struct h24p { int f; u32 off; u8 n, kind, old[4], nw[4]; } h24ps[] = {
     {0, 0x26142u, 2, H24, {0x03, 0x2d}, {0x03, 0x25}},     /* cmp r5, #3  ->  movs r5, #3 */
     {0, 0x26148u, 2, H24, {0x2d, 0xd0}, {0x2d, 0xe0}},     /* beq (24 hours)  ->  b */
@@ -347,6 +351,29 @@ static const struct h24p { int f; u32 off; u8 n, kind, old[4], nw[4]; } h24ps[] 
     {4, 0x30b5c4u, 4, IRIS_W, {0xdf, 0xf5, 0x1a, 0xe8}, {0x81, 0xf1, 0x0c, 0xfd}},   /* "--": blx memcpy  ->  bl 0x48cfe0 */
     {4, 0x30b844u, 4, IRIS_T, {0xf4, 0xe7, 0x04, 0x02}, {0xf6, 0xe7, 0x04, 0x02}},   /* F${v1:2}  ->  ${v1} (one byte) */
     {4, 0x30b754u, 2, IRIS_T, {0x02, 0xd9}, {0x02, 0xe0}},  /* its event filter: bls (events 0, 1)  ->  b (every event) */
+    /* DISP's "Level" gets the histogram too. Each display mode of the shooting screen is a layout in viewStlrec.uxc
+     * (the UI reads it when it builds that screen, no copy kept): slots, each naming one of master_camera's
+     * sub-layouts by the hash of its class (LG_master_camera::Layout...). In the Level layouts (LCD: record 41,
+     * EVF: record 55) a slot they don't need (water depth; the EVF has its own zoom bar besides the common one)
+     * gets Sony's histogram, as in the Histogram layouts. (Not in another mode: the level widget is found by name
+     * through a lookup compiled into each layout's class, and only the Level and For viewfinder ones know it;
+     * the histogram is fed by its model, wherever it is.) */
+    {6, 0x1f39u, 4, LAY, {0x5d, 0xa5, 0xb4, 0x55}, {0x19, 0xea, 0xb9, 0x70}},  /* WATERDEPTH1 -> HISTOGRAM_LL */
+    {7, 0x36feu, 4, LAY, {0x3d, 0x60, 0xec, 0xaa}, {0x7d, 0xbd, 0xa4, 0xae}},  /* CNM_REC_ZOOMBAR -> EVF_HISTOGRAM_LR */
+    /* and their dial guide is the Histogram layouts' one, which keeps the ISO dial above the histogram (the same
+     * widgets, so the Level classes' lookups still find them, with the same per-slot setting) */
+    {6, 0x1ec1u, 4, LAY, {0xc6, 0x82, 0x37, 0x4d}, {0x2c, 0x54, 0x8b, 0xed}},  /* DIALGUIDE1 -> DIALGUIDE_GRAPHIC1 */
+    {7, 0x36c2u, 4, LAY, {0xf3, 0x5b, 0x5c, 0x5f}, {0x34, 0x5e, 0xe8, 0x86}},  /* EVF_DIALGUIDE1 -> EVF_DIALGUIDE_GRAPHIC1 */
+    /* and the stlrec view switches the histogram's data on for the Level mode (4; 5 histogram, 6 for
+     * viewfinder) too: its test of the layout mode (UserGetLayoutMode) becomes a bit test, (mask >> mode) & 1,
+     * in the same bytes. Each goes in from its end, so until its first instruction is ours Sony's test still
+     * decides (at worst the histogram goes on or off once). */
+    {8, 0x11f19cu, 2, LAY, {0x01, 0x21}, {0x00, 0xbf}},                          /* LCD: 5, 6 -> 4, 5, 6 */
+    {8, 0x11f198u, 4, LAY, {0x8c, 0xbf, 0x00, 0x21}, {0xc9, 0x07, 0xc9, 0x0f}},  /*   r1 = (0x70 >> mode) & 1: movs r1, #0x70; */
+    {8, 0x11f194u, 4, LAY, {0x41, 0x1f, 0x01, 0x29}, {0x70, 0x21, 0xc1, 0x40}},  /*   lsrs r1, r0; lsls r1, #31; lsrs r1, #31; nop */
+    {8, 0x11f1bau, 4, LAY, {0x41, 0xeb, 0x0c, 0x01}, {0x00, 0xbf, 0x00, 0xbf}},  /* EVF: 5 -> 4, 5 */
+    {8, 0x11f1b6u, 4, LAY, {0xdc, 0xf1, 0x00, 0x01}, {0xc9, 0x07, 0xc9, 0x0f}},  /*   r1 = (0x30 >> mode) & 1, as above */
+    {8, 0x11f1b2u, 4, LAY, {0xa0, 0xf1, 0x05, 0x0c}, {0x30, 0x21, 0xc1, 0x40}},
 };
 #define NH24F ((int)(sizeof h24fs / sizeof h24fs[0]))
 #define NH24P ((int)(sizeof h24ps / sizeof h24ps[0]))
@@ -407,7 +434,7 @@ static int clock24(int on) {
             int k = pass ? x : NH24P - 1 - x;
             const struct h24p *P = &h24ps[k];
             struct h24f *F = &h24fs[P->f];
-            int mine = P->kind == H24 ? on : P->kind == IRIS_S ? 0 : (on && irisfl > 0 && irisfl < 10000);
+            int mine = (P->kind == H24 || P->kind == LAY) ? on : P->kind == IRIS_S ? 0 : (on && irisfl > 0 && irisfl < 10000);
             if (mine != pass) continue;
             if (!ok[P->f]) { bad = -2; continue; }        /* not the library we know: leave it */
             const u8 *want = !mine ? P->old : P->nw;
@@ -428,7 +455,7 @@ static int clock24(int on) {
                 /* the call to our code is Sony's again: a moment before our code goes, should the UI be in it */
                 if (P->kind == IRIS_W && !mine) { long ts[2] = {0, 200000000}; sc(SYS_NANOSLEEP, (long)ts, 0, 0, 0, 0); }
             }
-            if (P->kind == H24) n += on;
+            if (P->kind == H24 || P->kind == LAY) n += on;
         }
     irisin = 0;                                  /* every iris place ours: the label says so */
     { int t = 0, all = 0; for (int k = 0; k < NH24P; k++) { const struct h24p *P = &h24ps[k];

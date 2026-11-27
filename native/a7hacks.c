@@ -21,6 +21,9 @@
  *   liba7hacks.so --memory-changes start len [ms]  which 64 KB blocks of physical memory change (read only)
  *   liba7hacks.so --reg-read addr n               n 32-bit hardware registers from addr on (read only)
  *   liba7hacks.so --mem-find hex start len        where a byte string is in physical RAM (read only)
+ *   liba7hacks.so --off-watch path seconds        log what changes around a switch-off (read only)
+ *   liba7hacks.so --lv-timing ms                  when the live view buffers change and flip (read only)
+ *   liba7hacks.so --osd-mark shown|hidden secs    test: a magenta square in the shown/hidden OSD buffer
  *   liba7hacks.so --ui-find hex                   where a byte string is in the UI's own data (read only)
  *   liba7hacks.so --screenshot [osd.png lv.png] both.png
  *                                                 Sony's own screen as a PNG: its OSD over the live view (LCD or
@@ -1194,7 +1197,7 @@ static int memdump(const char *path, int dev) {
  * buffered, as UYVY (4:2:2, full range) at fixed physical addresses in the /dev/stream pool (LVA, LVB; found
  * 2026-11-26 by watching which memory changes, see --memory-changes). The panel itself shows another, compressed
  * copy (2 buffers on the LCD at 30 frames a second, 3 in the EVF at 60), named by DREG_LV; each UYVY frame is
- * written ~10 ms before the panel flips to its compressed twin (measured 2026-11-28), so at a flip the UYVY buffer written
+ * written ~10 ms before the panel flips to its compressed twin (--lv-timing), so at a flip the UYVY buffer written
  * last is the frame on screen, and that one is copied (lvshown). Without flips (playback, menus): lvgrab.
  * both.png (RGB, 640x480) is the OSD over the live view, the way the panel shows it: the live view at the top on
  * the LCD, 27 rows down in the EVF (told by the flips: 60 a second); black behind the OSD when the
@@ -2325,6 +2328,273 @@ static int regread(const char *s, const char *l) {
     return 0;
 }
 
+/* --off-watch path seconds: a log of what changes around a switch-off (which suspends the camera to RAM, so the
+ * log in /android/dev survives it), for the shutdown screen. Every 20 ms: both OSD buffers (every 8th row: a hash and
+ * how many pixels aren't fully transparent), whether the live view runs, the UI's process state, the GPIO and
+ * indicator (LEDs) lines of /proc/udm, and the display registers below ("R" lines). One line per change: ms since start (CLOCK_BOOTTIME, which counts through a
+ * suspend), ms spent suspended so far, then the values; GPIO/LED lines that changed follow it. Read only. */
+#define OWROWS 8
+/* display registers (av-cam's display output, "VPH": the pages its code refers to most): read uncached; those that
+ * change by themselves in the first 3 s count as noisy and are left out; read only until 1 s after the switch-off
+ * (OSD blank, live view stopped), in case the display's clocks are stopped after that */
+static const u32 owrp[] = {0xf3400000u, 0xf3440000u, 0xf3441000u, 0xf3445000u, 0xf3446000u};   /* 0xf3400000 first: the
+                                                  display path's clock enables (0x15 -> 0 at the switch-off) */
+#define OWNR (sizeof owrp / sizeof owrp[0])
+static u32 owrv[OWNR][1024];
+static u8 ownoisy[OWNR][1024];
+static char owg[2][4096], owi[2][1024];
+static int owlog = -1, owlines;
+static void owsay(const char *s) { int n = 0; while (s[n]) n++; if (owlog >= 0) sc(SYS_WRITE, owlog, (long)s, n, 0, 0); }
+static void owsayn(u32 v) { char b[12]; int i = 11; b[i] = 0; do { b[--i] = '0' + v % 10; v /= 10; } while (v && i > 0); owsay(b + i); }
+static void owsayx(u32 v) { char b[9]; for (int i = 0; i < 8; i++) b[i] = "0123456789abcdef"[(v >> (28 - 4 * i)) & 15]; b[8] = 0; owsay(b); }
+static int rdfile(const char *path, char *b, int max) {
+    int f = sc(SYS_OPEN, (long)path, 0, 0, 0, 0), n = 0, r;
+    if (f < 0) { b[0] = 0; return -1; }
+    while (n < max - 1 && (r = sc(SYS_READ, f, (long)(b + n), max - 1 - n, 0, 0)) > 0) n += r;
+    sc(SYS_CLOSE, f, 0, 0, 0, 0);
+    b[n] = 0; return n;
+}
+static u32 msclock(int id) { long ts[2] = {0, 0}; sc(SYS_CLOCK_GETTIME, id, (long)ts, 0, 0, 0); return (u32)ts[0] * 1000u + (u32)ts[1] / 1000000u; }
+/* the lines of b that differ from the same line of a (indicator: skips the clock line "now SYSCNT") */
+static void owdiff(const char *tag, const char *a, const char *b) {
+    while (*b) {
+        const char *ea = a, *eb = b;
+        while (*ea && *ea != '\n') ea++;
+        while (*eb && *eb != '\n') eb++;
+        int d = (ea - a) != (eb - b);
+        for (const char *p = a, *q = b; !d && q < eb; p++, q++) if (*p != *q) d = 1;
+        if (d && !(eb - b > 3 && b[0] == 'n' && b[1] == 'o' && b[2] == 'w')) {
+            owsay("    "); owsay(tag); owsay(" "); sc(SYS_WRITE, owlog, (long)b, eb - b, 0, 0); owsay("\n");
+        }
+        a = *ea ? ea + 1 : ea; b = *eb ? eb + 1 : eb;
+    }
+}
+static int offwatch(const char *path, const char *s) {
+    u32 secs_ = 0;
+    if (!dec(s, &secs_) || !secs_ || secs_ > 3600) { out("error usage"); return 1; }
+    fd = sc(SYS_OPEN, (long)"/dev/mem", 0, 0, 0, 0);
+    if (fd < 0) { out("error open /dev/mem"); return 2; }
+    findprocs(0);
+    if (!np_) { out("noui"); return 1; }
+    int pid = plist[0];
+    nst = 0; wantstream = 1; int r = readmaps(pid); wantstream = 0;
+    if (r < 0) { out("error maps"); return 2; }
+    u32 buf[2]; int nb = 0;
+    for (int k = 0; k < nst; k++) if (stlen[k] == OSDLEN && nb < 3) { if (nb < 2) buf[nb] = stpa[k]; nb++; }
+    if (nb != 2) { out("error "); outn((u32)nb); out(" OSD buffers"); return 2; }
+    for (int k = 0; k < 2; k++)
+        if ((buf[k] & 4095) || (u32)(buf[k] - RAM_LO) >= RAM_SIZE || RAM_SIZE - (buf[k] - RAM_LO) < OSDLEN) { out("error OSD buffer not in RAM"); return 2; }
+    if ((u32)(LVA - RAM_LO) >= RAM_SIZE || RAM_SIZE - (LVB - RAM_LO) < LVLEN) { out("error live view not in RAM"); return 2; }
+    owlog = sc(SYS_OPEN, (long)path, 01 | 0100 | 01000, 0644, 0, 0);
+    if (owlog < 0) { out("error open output"); return 2; }
+    char stp[32]; procpath(stp, pid, "stat");
+    char st[512];
+    int bt = msclock(7) != 0 || msclock(1) == 0 ? 7 : 1;         /* CLOCK_BOOTTIME if the kernel has it */
+    u32 b0 = msclock(bt), m0 = msclock(1), lvw[2] = {0, 0}, lvt = 0, last[8], cur = 0, pr = 0;
+    for (int i = 0; i < 8; i++) last[i] = 0xffffffffu;
+    owsay("# off-watch: OSD "); owsayx(buf[0]); owsay(" "); owsayx(buf[1]); owsay(", UI pid "); owsayn((u32)pid);
+    const volatile u32 *rg[OWNR];
+    int rf = sc(SYS_OPEN, (long)"/dev/mem", 0x101000 /* O_RDONLY | O_SYNC */, 0, 0, 0);
+    if (rf < 0) { owsay("error open /dev/mem for registers\n"); sc(SYS_CLOSE, owlog, 0, 0, 0, 0); out("error registers"); return 2; }
+    for (u32 k = 0; k < OWNR; k++) {
+        long m = sc6(SYS_MMAP2, 0, 0x1000, 1 /* PROT_READ */, 1 /* MAP_SHARED */, rf, (long)(owrp[k] >> 12));
+        if ((unsigned long)m >= 0xfffff000ul) { owsay("error mmap registers\n"); sc(SYS_CLOSE, owlog, 0, 0, 0, 0); out("error registers"); return 2; }
+        rg[k] = (const volatile u32 *)m;
+        for (u32 i = 0; i < 1024; i++) { owrv[k][i] = rg[k][i]; ownoisy[k][i] = 0; }
+    }
+    sc(SYS_CLOSE, rf, 0, 0, 0, 0);
+    int regs = 1, armed = 0; u32 offat = 0, learned = 0;
+    owsay(bt == 7 ? ", boottime\n# ms slept | OSD A hash shown | OSD B hash shown | lv | UI state cpu\n" : ", NO boottime (monotonic only)\n");
+    for (;;) {
+        u32 now = msclock(bt), mono = msclock(1), v[8];
+        if (now - b0 > secs_ * 1000u || owlines > 3000) break;
+        for (int k = 0; k < 2; k++) {
+            u32 h = 2166136261u, shown = 0;
+            for (int y = 0; y < OSDH; y += OWROWS) {
+                if (pread_(buf[k] + y * OSDW * 2, rowa, OSDW * 2) < 0) { owsay("error read OSD\n"); goto done; }
+                for (int x = 0; x < OSDW * 2; x += 2) { u32 p = rowa[x] | rowa[x + 1] << 8; h = (h ^ p) * 16777619u; if (p & 15) shown++; }
+            }
+            v[2 * k] = h; v[2 * k + 1] = shown;
+        }
+        int lvmoved = 0;
+        for (int k = 0; k < 2; k++) { u8 w[4]; if (pread_((k ? LVB : LVA) + LVLEN / 2, w, 4) == 0 && rd32(w) != lvw[k]) { lvw[k] = rd32(w); lvmoved = 1; } }
+        if (lvmoved) lvt = now;
+        v[4] = now - lvt < 300;                                  /* the live view ran in the last 300 ms */
+        int n = rdfile(stp, st, sizeof st);
+        char state = '?'; u32 ticks = 0;
+        if (n > 0) {                                             /* "pid (comm) S ... field 14 utime 15 stime" */
+            const char *p = st; while (*p && *p != ')') p++;
+            if (*p) { p += 2; state = *p; int f = 3;
+                while (*p && f < 14) { if (*p == ' ') f++; p++; }
+                u32 a = 0, b = 0; while (*p >= '0' && *p <= '9') a = a * 10 + (u32)(*p++ - '0');
+                if (*p == ' ') p++; while (*p >= '0' && *p <= '9') b = b * 10 + (u32)(*p++ - '0');
+                ticks = a + b; }
+        }
+        int rch = 0;
+        if (v[4]) armed = 1;
+        if (armed && !offat && !v[4] && (!v[1] || !v[3])) offat = now ? now : 1;
+        if (regs && offat && now - offat > 1000) { regs = 0; owsay("# registers: no more reads (1 s after the switch-off)\n"); }
+        if (regs) {
+            int learn = now - b0 < 3000;
+            if (!learn && !learned) { learned = 1; u32 nn = 0; for (u32 k = 0; k < OWNR; k++) for (u32 i = 0; i < 1024; i++) nn += ownoisy[k][i];
+                owsay("# registers: "); owsayn(nn); owsay(" noisy ones left out; watching the rest\n"); }
+            for (u32 k = 0; k < OWNR; k++) for (u32 i = 0; i < 1024; i++) {
+                u32 x = rg[k][i];
+                if (x == owrv[k][i]) continue;
+                if (learn) ownoisy[k][i] = 1;
+                else if (!ownoisy[k][i]) {
+                    if (!rch) { owsay("    R at "); owsayn(now - b0); owsay(":\n"); }
+                    rch = 1; owsay("    R "); owsayx(owrp[k] + i * 4); owsay(" "); owsayx(owrv[k][i]); owsay(" > "); owsayx(x); owsay("\n");
+                }
+                owrv[k][i] = x;
+            }
+        }
+        v[5] = (u32)state; v[6] = (int)((now - b0) - (mono - m0)) < 50 ? 0 : (now - b0) - (mono - m0);   /* ms suspended (the clocks differ by a ms) */
+        rdfile("/proc/udm/gpio", owg[cur], sizeof owg[0]);
+        rdfile("/proc/udm/indctr", owi[cur], sizeof owi[0]);
+        int ch = 0;
+        for (int i = 0; i < 6; i++) if (v[i] != last[i]) ch = 1;   /* not the cpu ticks */
+        if (v[6] != last[6]) ch = 1;
+        int gch = 0, ich = 0;
+        if (owlines) {
+            for (int i = 0; owg[cur][i] || owg[!cur][i]; i++) if (owg[cur][i] != owg[!cur][i]) { gch = 1; break; }
+            const char *a = owi[cur], *b = owi[!cur];            /* the indicator file, without its clock line */
+            for (;;) {
+                while (*a == 'n' && a[1] == 'o' && a[2] == 'w') { while (*a && *a != '\n') a++; if (*a) a++; }
+                while (*b == 'n' && b[1] == 'o' && b[2] == 'w') { while (*b && *b != '\n') b++; if (*b) b++; }
+                if (*a != *b) { ich = 1; break; }
+                if (!*a) break;
+                a++; b++;
+            }
+        }
+        if (ch || gch || ich || !owlines) {
+            owsayn(now - b0); owsay(" "); owsayn(v[6]);
+            owsay(" | "); owsayx(v[0]); owsay(" "); owsayn(v[1]); owsay(" | "); owsayx(v[2]); owsay(" "); owsayn(v[3]);
+            owsay(" | "); owsay(v[4] ? "lv" : "--"); owsay(" | "); char sc_[2] = {state, 0}; owsay(sc_); owsay(" "); owsayn(ticks - pr);
+            owsay("\n");
+            if (!owlines) { owsay("    gpio at start:\n"); owdiff("G", "", owg[cur]); owsay("    indctr at start:\n"); owdiff("I", "", owi[cur]); }
+            else { if (gch) owdiff("G", owg[!cur], owg[cur]); if (ich) owdiff("I", owi[!cur], owi[cur]); }
+            owlines++; pr = ticks;
+            for (int i = 0; i < 7; i++) last[i] = v[i];
+        }
+        cur = !cur;
+        long ts[2] = {0, 20000000};
+        sc(SYS_NANOSLEEP, (long)ts, 0, 0, 0, 0);
+    }
+done:
+    for (u32 k = 0; k < OWNR; k++) sc(SYS_MUNMAP, (long)rg[k], 0x1000, 0, 0, 0);
+    owsay("# end\n");
+    sc(SYS_CLOSE, owlog, 0, 0, 0, 0);
+    out("logged "); outn((u32)owlines); out(" lines to "); out(path);
+    return 0;
+}
+
+/* --osd-mark shown|hidden seconds: a test of the display register 0xf3441320, which holds the OSD buffer the
+ * display shows. Paints a 48x48 magenta square in the middle of the shown (or the other) OSD buffer, through our own
+ * mapping of /dev/stream, and after `seconds` puts the pixels back (only where our magenta still is). The UI flips
+ * its two buffers when it redraws, so on a still screen the shown one stays shown. Prints the register before and
+ * after. */
+#define MARK 48
+static u16 marksave[MARK * MARK];
+static int osdmark(const char *which, const char *s) {
+    u32 secs_ = 0, want = eq(which, "shown") ? 1 : eq(which, "hidden") ? 2 : 0;
+    if (!want || !dec(s, &secs_) || !secs_ || secs_ > 60) { out("error usage"); return 1; }
+    fd = sc(SYS_OPEN, (long)"/dev/mem", 0, 0, 0, 0);
+    if (fd < 0) { out("error open /dev/mem"); return 2; }
+    findprocs(0);
+    if (!np_) { out("noui"); return 1; }
+    nst = 0; wantstream = 1; int r = readmaps(plist[0]); wantstream = 0;
+    if (r < 0) { out("error maps"); return 2; }
+    u32 buf[2]; int nb = 0;
+    for (int k = 0; k < nst; k++) if (stlen[k] == OSDLEN && nb < 3) { if (nb < 2) buf[nb] = stpa[k]; nb++; }
+    if (nb != 2) { out("error "); outn((u32)nb); out(" OSD buffers"); return 2; }
+    int rf = sc(SYS_OPEN, (long)"/dev/mem", 0x101000 /* O_RDONLY | O_SYNC */, 0, 0, 0);
+    if (rf < 0) { out("error open /dev/mem"); return 2; }
+    long rm = sc6(SYS_MMAP2, 0, 0x1000, 1, 1, rf, (long)(0xf3441000u >> 12));
+    sc(SYS_CLOSE, rf, 0, 0, 0, 0);
+    if ((unsigned long)rm >= 0xfffff000ul) { out("error mmap register"); return 2; }
+    const volatile u32 *reg = (const volatile u32 *)(rm + 0x320);
+    u32 on = *reg;
+    int k = on == buf[0] ? 0 : on == buf[1] ? 1 : -1;
+    if (k < 0) { out("error register "); outx(on); out(" is neither OSD buffer"); return 2; }
+    if (want == 2) k = !k;
+    for (int j = 0; j < 2; j++)
+        if ((buf[j] & 4095) || (u32)(buf[j] - RAM_LO) >= RAM_SIZE || RAM_SIZE - (buf[j] - RAM_LO) < OSDLEN) { out("error OSD buffer not in RAM"); return 2; }
+    int sf = sc(SYS_OPEN, (long)"/dev/stream", 2 | 0x101000 /* O_RDWR | O_SYNC */, 0, 0, 0);
+    if (sf < 0) { out("error open /dev/stream"); return 2; }
+    long m = sc6(SYS_MMAP2, 0, OSDLEN, 3, 1, sf, (long)(buf[k] >> 12));
+    if ((unsigned long)m >= (unsigned long)-4095L) { out("error mmap"); return 2; }
+    volatile u16 *o = (volatile u16 *)m;
+    u32 x0 = (OSDW - MARK) / 2, y0 = (OSDH - MARK) / 2;
+    const u16 mag = 0xf0ff;                                  /* RGBA4444: R 15, G 0, B 15, A 15 */
+    for (u32 y = 0; y < MARK; y++) for (u32 x = 0; x < MARK; x++) { u32 i = (y0 + y) * OSDW + x0 + x; marksave[y * MARK + x] = o[i]; o[i] = mag; }
+    long ts[2] = {(long)secs_, 0};
+    sc(SYS_NANOSLEEP, (long)ts, 0, 0, 0, 0);
+    u32 after = *reg, kept = 0;
+    for (u32 y = 0; y < MARK; y++) for (u32 x = 0; x < MARK; x++) { u32 i = (y0 + y) * OSDW + x0 + x; if (o[i] == mag) { o[i] = marksave[y * MARK + x]; kept++; } }
+    sc(SYS_MUNMAP, m, OSDLEN, 0, 0, 0); sc(SYS_MUNMAP, rm, 0x1000, 0, 0, 0); sc(SYS_CLOSE, sf, 0, 0, 0, 0);
+    out("marked "); out(want == 1 ? "shown" : "hidden"); out(" buffer "); outx(buf[k]); out(" (register before "); outx(on);
+    out(", after "); outx(after); out("); "); outn(kept); out(" of "); outn(MARK * MARK); out(" mark pixels were still ours");
+    return 0;
+}
+
+/* --lv-timing ms: when the live view's buffers change, for `ms` milliseconds (at most 5000), read only. Watched in a
+ * tight loop, all uncached: the display register 0xf3441220 (the compressed live view buffer the panel shows), one
+ * word in each of those three buffers (when the camera writes them), and the middle word of each UYVY buffer (LVA,
+ * LVB: the copy --screenshot uses). Prints each change (us since start, what, value), then per source the number of
+ * changes and the first and last time. */
+#define LVTN 7
+#define LVTMAX 6000
+static u32 lvtt[LVTMAX], lvtv[LVTMAX]; static u8 lvtw[LVTMAX];
+static int lvtiming(const char *s) {
+    u32 ms = 0;
+    if (!dec(s, &ms) || !ms || ms > 5000) { out("error usage"); return 1; }
+    static const u32 cbuf[3] = {0x8eb00000u, 0x8ec34000u, 0x8ed68000u};
+    static const char *names[LVTN] = {"shown", "C0", "C1", "C2", "LVA", "LVB", "pos"};
+    int f = sc(SYS_OPEN, (long)"/dev/mem", 0x101000 /* O_RDONLY | O_SYNC */, 0, 0, 0);
+    if (f < 0) { out("error open /dev/mem"); return 2; }
+    long rm = sc6(SYS_MMAP2, 0, 0x1000, 1, 1, f, (long)(0xf3441000u >> 12));
+    if ((unsigned long)rm >= 0xfffff000ul) { out("error mmap"); return 2; }
+    const volatile u32 *w[LVTN];
+    w[0] = (const volatile u32 *)(rm + 0x220);
+    w[6] = (const volatile u32 *)(rm + 0x210);
+    u32 pa[5] = {cbuf[0] + 0x40000, cbuf[1] + 0x40000, cbuf[2] + 0x40000, LVA + LVLEN / 2, LVB + LVLEN / 2};
+    long pm[5];
+    for (int k = 0; k < 5; k++) {
+        if ((u32)(pa[k] - RAM_LO) >= RAM_SIZE) { out("error not in RAM"); return 2; }
+        pm[k] = sc6(SYS_MMAP2, 0, 0x1000, 1, 1, f, (long)(pa[k] >> 12));
+        if ((unsigned long)pm[k] >= 0xfffff000ul) { out("error mmap"); return 2; }
+        w[1 + k] = (const volatile u32 *)(pm[k] + (pa[k] & 0xfff));
+    }
+    sc(SYS_CLOSE, f, 0, 0, 0, 0);
+    u32 last[LVTN], cnt[LVTN], first[LVTN], prev[LVTN]; int n = 0;
+    for (int k = 0; k < LVTN; k++) { last[k] = w[k][0]; cnt[k] = 0; first[k] = prev[k] = 0; }
+    u32 t0 = usnow(), loops = 0;
+    for (;;) {
+        u32 t = usnow() - t0;
+        if (t > ms * 1000u) break;
+        loops++;
+        for (int k = 0; k < LVTN; k++) {
+            u32 v = w[k][0];
+            if (v == last[k]) continue;
+            last[k] = v;
+            if (!cnt[k]) first[k] = t;
+            cnt[k]++; prev[k] = t;
+            if (k != 6 && n < LVTMAX) { lvtt[n] = t; lvtv[n] = v; lvtw[n] = (u8)k; n++; }
+        }
+    }
+    for (int i = 0; i < n; i++) { sayn(lvtt[i]); say(" "); say(names[lvtw[i]]); say(" "); sayx(lvtv[i]); say("\n"); }
+    for (int k = 0; k < LVTN; k++) {
+        say("# "); say(names[k]); say(": "); sayn(cnt[k]); say(" changes");
+        if (cnt[k] > 1) { say(", first at "); sayn(first[k]); say(" us, last at "); sayn(prev[k]); say(" us"); }
+        say("\n");
+    }
+    for (int k = 0; k < 5; k++) sc(SYS_MUNMAP, pm[k], 0x1000, 0, 0, 0);
+    sc(SYS_MUNMAP, rm, 0x1000, 0, 0, 0);
+    out("loops "); outn(loops); out(" in "); outn(ms); out(" ms");
+    return 0;
+}
+
 /* When this helper was built: "yyyy-mm-dd HH:MM:SS", UTC (Gradle's buildHelper passes it). --version prints it; the
  * app runs that (as itself, no root needed) for its info dialog. */
 #ifndef A7_BUILT
@@ -2348,6 +2618,9 @@ static int run(int argc, char **argv) {
     if (eq(o, "--memory-dump") && (argc == 3 || (argc == 4 && eq(argv[3], "--all")))) return memdump(argv[2], argc == 4);
     if (eq(o, "--memory-changes") && (argc == 4 || argc == 5)) return memchanges(argv[2], argv[3], argc == 5 ? argv[4] : 0);
     if (argc == 4 && eq(o, "--reg-read")) return regread(argv[2], argv[3]);
+    if (argc == 4 && eq(o, "--off-watch")) return offwatch(argv[2], argv[3]);
+    if (argc == 3 && eq(o, "--lv-timing")) return lvtiming(argv[2]);
+    if (argc == 4 && eq(o, "--osd-mark")) return osdmark(argv[2], argv[3]);
     if (argc == 3 && eq(o, "--ui-find")) return uifind(argv[2]);
     if (argc == 5 && eq(o, "--mem-find")) return memfind(argv[2], argv[3], argv[4]);
     if (eq(o, "--glyph-cache")) {

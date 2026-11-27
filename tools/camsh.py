@@ -8,7 +8,13 @@ every command costs a mode change (each one sends the camera back through its US
   camsh.py sh 'COMMAND'          run COMMAND in the camera's shell (as root), print its output
   camsh.py pull REMOTE LOCAL     copy a file from the camera
   camsh.py push LOCAL REMOTE     copy a file to the camera (big ones to the SD card: /android/dev is RAM, ~4 MB free)
-  camsh.py shot OUT.png          screenshot of the Android screen (screencap into RAM, copied over, removed)
+  camsh.py shot OUT.png          screenshot of the camera's screen as shown: Sony's OSD over the live view (the
+                                 helper's --screenshot into RAM, copied over, removed)
+  camsh.py shot OSD.png LV.png OUT.png
+                                 the same, plus the OSD and the live view each on its own (via the SD card: three
+                                 PNGs don't fit in the camera's free RAM)
+  camsh.py shot --android OUT.png
+                                 Android's own frame instead (screencap into RAM)
   camsh.py quit                  end the session properly (before an install, say)
 
 The terminal is switched on once and left on; files are read while it is on. serve uses pmca (Sony-PMCA-RE in
@@ -20,6 +26,11 @@ SOCK = os.path.join(os.environ.get('XDG_RUNTIME_DIR') or '/tmp', 'camsh.sock')
 SHOT_REMOTE = '/android/dev/a7shot.png'      # /android/dev is tmpfs: RAM
 SHOT = ('chroot /android /system/bin/sh -c "ANDROID_ROOT=/system ANDROID_DATA=/data '
         'LD_LIBRARY_PATH=/system/lib /system/bin/screencap -p /dev/a7shot.png"')
+# the helper's --screenshot: the test copy when there is one (an install removes it, so it's the newer one)
+LIBDIR = '/android/data/lib/nl.peetz0r.a7hacks/lib/'
+HELPER = ('h=%sliba7test.so; [ -x $h ] || h=%sliba7hacks.so; echo "($h)"; $h --screenshot' % (LIBDIR, LIBDIR))
+SHOT3_REMOTE = ['/android/storage/sdcard0/A7SHOT_O.PNG', '/android/storage/sdcard0/A7SHOT_L.PNG',
+                '/android/storage/sdcard0/A7SHOT_B.PNG']   # SD card (8.3 names), removed afterwards
 
 
 def sh(cam, cmd, timeout=60):
@@ -147,12 +158,24 @@ def serve():
                         elif req[0] == 'push':
                             with open(req[1], 'rb') as f: b.writeFile(req[2], f)
                             res = {'ok': '%d bytes to %s' % (os.path.getsize(req[1]), req[2])}
-                        elif req[0] == 'shot':
+                        elif req[0] == 'shot' and req[1] == '--android':
                             out, rc = sh(cam, 'rm -f %s; %s' % (SHOT_REMOTE, SHOT))
                             if rc: raise Exception('screencap: rc %d %s' % (rc, out))
-                            with open(req[1], 'wb') as f: b.readFile(SHOT_REMOTE, f)
+                            with open(req[2], 'wb') as f: b.readFile(SHOT_REMOTE, f)
                             sh(cam, 'rm -f ' + SHOT_REMOTE)
-                            res = {'ok': '%d bytes to %s' % (os.path.getsize(req[1]), req[1])}
+                            res = {'ok': '%d bytes to %s' % (os.path.getsize(req[2]), req[2])}
+                        elif req[0] == 'shot':
+                            local = req[1:]
+                            remote = SHOT3_REMOTE if len(local) == 3 else [SHOT_REMOTE]
+                            out, rc = sh(cam, 'rm -f %s; %s %s' % (' '.join(remote), HELPER, ' '.join(remote)))
+                            try:
+                                if rc or 'written' not in out: raise Exception('screenshot: rc %d %s' % (rc, out.strip()))
+                                for r, l in zip(remote, local):
+                                    with open(l, 'wb') as f: b.readFile(r, f)
+                            finally:
+                                sh(cam, 'rm -f ' + ' '.join(remote))
+                            res = {'ok': out.strip().replace('\n', ' ') + '\n' +
+                                   ', '.join('%d bytes to %s' % (os.path.getsize(l), l) for l in local)}
                         else:
                             res = {'error': 'unknown command'}
                     except Exception as e:
@@ -169,8 +192,10 @@ def serve():
 
 
 def client(args):
-    if args[0] in ('pull', 'shot'):
+    if args[0] == 'pull':
         args = args[:-1] + [os.path.abspath(args[-1])]
+    if args[0] == 'shot':
+        args = args[:1] + [a if a == '--android' else os.path.abspath(a) for a in args[1:]]
     if args[0] == 'push':
         args = [args[0], os.path.abspath(args[1]), args[2]]
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -187,6 +212,8 @@ def client(args):
 if __name__ == '__main__':
     a = sys.argv[1:]
     usage = {'serve': 0, 'sh': 1, 'pull': 2, 'push': 2, 'shot': 1, 'quit': 0}
-    if not a or a[0] not in usage or (len(a) != usage[a[0]] + 1 and a != ['serve', '--updater']):
+    shot = a[:1] == ['shot'] and (len(a) in (2, 4) and '--android' not in a or len(a) == 3 and a[1] == '--android')
+    if not a or a[0] not in usage or (len(a) != usage[a[0]] + 1 and a != ['serve', '--updater'] and not shot) \
+            or (a[0] == 'shot' and not shot):
         sys.exit(__doc__)
     sys.exit((serve_updater() if a[1:2] == ['--updater'] else serve()) if a[0] == 'serve' else client(a))

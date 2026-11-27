@@ -19,6 +19,9 @@
  *   liba7hacks.so --memory-dump path [--all]      copy the UI's own data to path (for study elsewhere;
  *                                                 --all: and the driver memory it has mapped, RAM pages only)
  *   liba7hacks.so --memory-changes start len [ms]  which 64 KB blocks of physical memory change (read only)
+ *   liba7hacks.so --reg-read addr n               n 32-bit hardware registers from addr on (read only)
+ *   liba7hacks.so --mem-find hex start len        where a byte string is in physical RAM (read only)
+ *   liba7hacks.so --ui-find hex                   where a byte string is in the UI's own data (read only)
  *   liba7hacks.so --screenshot [osd.png lv.png] both.png [--evf]
  *                                                 Sony's own screen as a PNG: its OSD over the live view (--evf:
  *                                                 placed as on the EVF); with three names also each on its own
@@ -47,14 +50,16 @@
  * restores the call site before the mailbox. Status lines (on N | lens | off | badsig | badsite | error ...) go
  * to /android/dev/a7hacks.ex when they change.
  *
- * Menu label (--label-patcher): the English menu item for the SteadyShot focal length reads "SteadyS. Focal
- * Len.". The camera UI (im.elf, which runs libObj.so) reads its strings from /usr/share/app/string_english.uxc
- * into its own memory once per boot (with O_DIRECT, so there's no page-cache copy). The label patcher finds that
- * copy and writes "Manual Focal Length" over the text: the same length, so nothing else moves. A string record
- * is a u32 id, the text and a NUL; we only touch a complete record (id 0x1e04f85a + the exact old text). The
+ * Menu labels (--label-patcher): the English menu item for the SteadyShot focal length reads "SteadyS. Focal
+ * Len.", and the peaking colour menu's third choice "Yellow" (its colour is ours: see pics.c, peaking). The
+ * camera UI (im.elf, which runs libObj.so) reads its strings from /usr/share/app/string_english.uxc into its own
+ * memory once per boot (with O_DIRECT, so there's no page-cache copy). The label patcher finds that copy and
+ * writes "Manual Focal Length" and "Custom" over the texts: the same lengths, so nothing else moves. A string
+ * record is a u32 id, the text and a NUL; we only touch a complete record (id 0x1e04f85a or 0x1e04e566 + the
+ * exact old text). The
  * UI's memory is reached via /proc/PID/pagemap (virtual -> physical) and /dev/mem; only that process's pages
  * are read, and only addresses in RAM. The UI only loads the menu strings when it needs them (the first time the
- * menu opens, say), so until the label turns up the patcher looks every 2 s at just the memory the UI has newly
+ * menu opens, say), so until both labels turn up the patcher looks every 2 s at just the memory the UI has newly
  * taken into use (pages that weren't there, or sat in another frame, at the previous look), and through all of
  * it every 10..60 s. Once found, it checks the copies it knows about every 2 s (and renames a fresh one again),
  * and looks for other copies every 5 minutes. Status (on N | waiting MB | noui | error ...) goes to
@@ -81,7 +86,8 @@
  * that isn't exactly the one this was made for (status gets "noicons" / "nopics"). Status (on N [cM | nocache]
  * [tK | nolabels] [pP[/T] | nopics] [aA] [noicons] | partial N/M [pP/T] | off [pics] | badfile | error ...; M = cached
  * characters marked; P/T: pictures done of how many, while they are still being done; hH: the time in 24 hours
- * (pics.c, clock24) in H places; iI: live view shows the focal length I instead of F--; fF, sS: seconds from the
+ * (pics.c, clock24) in H places; iI: live view shows the focal length I instead of F--; kYYCBCR: focus peaking's
+ * "Custom" colour (Sony's Yellow) is ours, in Y, Cb, Cr (from /android/dev/a7hacks.pk); fF, sS: seconds from the
  * patcher's start until the font, and the pictures, were all in) goes to
  * /android/dev/a7hacks.ft. A stop (SIGTERM, the app's Restart) is held off while
  * the patcher writes, so nothing is left half written.
@@ -122,6 +128,7 @@ static long sc6(long n, long a, long b, long c, long d, long e, long f) {
 #define PICDIR "/usr/share/app/"
 #define DROPCACHES "/proc/sys/vm/drop_caches"
 #define SSFILE "/android/dev/a7hacks.ss"
+#define PKFILE "/android/dev/a7hacks.pk"
 #define CKSTATUS "/android/dev/a7hacks.ck"
 #define UDATE "/proc/udm/udate"
 #define ALARMDEV "/dev/alarm"
@@ -145,6 +152,7 @@ long sc6(long n, long a, long b, long c, long d, long e, long f);
 #endif
 #define DROPCACHES "drop_caches"
 #define SSFILE "a7hacks.ss"
+#define PKFILE "a7hacks.pk"
 #define CKSTATUS "a7hacks.ck"
 #define UDATE "udate"
 #define ALARMDEV "alarm"
@@ -355,9 +363,14 @@ static int exposure(void) {
 }
 
 /* ---- menu label (--label-patcher and --label-find) ---- */
-#define LREC 24                /* one string record: u32 id + 19 characters + NUL */
+#define LREC 24                /* the longest string record we look for: u32 id + 19 characters + NUL */
 static const u8 lab_old[LREC] = {0x5a,0xf8,0x04,0x1e,'S','t','e','a','d','y','S','.',' ','F','o','c','a','l',' ','L','e','n','.',0};
 static const u8 lab_new[LREC] = {0x5a,0xf8,0x04,0x1e,'M','a','n','u','a','l',' ','F','o','c','a','l',' ','L','e','n','g','t','h',0};
+/* the peaking colour menu's third choice (its own record, after "Peaking Color"): its colour is ours (pics.c) */
+static const u8 pkl_old[11] = {0x66,0xe5,0x04,0x1e,'Y','e','l','l','o','w',0};
+static const u8 pkl_new[11] = {0x66,0xe5,0x04,0x1e,'C','u','s','t','o','m',0};
+static const struct lab { int n; const u8 *old, *nw; } labs[] = {{LREC, lab_old, lab_new}, {11, pkl_old, pkl_new}};
+#define NLAB ((int)(sizeof labs / sizeof labs[0]))
 
 static void outx(u32 v) {
     char b[9]; for (int i = 0; i < 8; i++) b[i] = "0123456789abcdef"[(v >> (28 - 4 * i)) & 15];
@@ -417,12 +430,17 @@ static int vrw(int pid, u32 va, u8 *b, int n, int wr) {
 
 /* the label records found so far */
 #define MAXHITS 8
-static int hpid[MAXHITS]; static u32 hva[MAXHITS]; static int nhits;
-static void addhit(int pid, u32 va) {
+static int hpid[MAXHITS], hlab[MAXHITS]; static u32 hva[MAXHITS]; static int nhits;
+static void addhit(int pid, u32 va, int l) {
     for (int i = 0; i < nhits; i++) if (hpid[i] == pid && hva[i] == va) return;
-    if (nhits < MAXHITS) { hpid[nhits] = pid; hva[nhits] = va; nhits++; }
+    if (nhits < MAXHITS) { hpid[nhits] = pid; hva[nhits] = va; hlab[nhits] = l; nhits++; }
 }
-static void delhit(int i) { for (; i + 1 < nhits; i++) { hpid[i] = hpid[i + 1]; hva[i] = hva[i + 1]; } nhits--; }
+/* every label found (at least one copy each)? */
+static int labsfound(void) {
+    for (int l = 0; l < NLAB; l++) { int f = 0; for (int i = 0; i < nhits; i++) if (hlab[i] == l) f = 1; if (!f) return 0; }
+    return 1;
+}
+static void delhit(int i) { for (; i + 1 < nhits; i++) { hpid[i] = hpid[i + 1]; hva[i] = hva[i + 1]; hlab[i] = hlab[i + 1]; } nhits--; }
 
 /* the mappings of one process worth looking through, from /proc/PID/maps */
 #define MAXRNG 4000
@@ -506,8 +524,9 @@ static int pgn[2], pgcur, pgok, pgpid = -1;
 
 static void findin(int pid, u32 va, int from, int to) {
     for (int j = from; j <= to; j++)
-        if (pg[j] == 0x5a && (same(pg + j, lab_old, LREC) || same(pg + j, lab_new, LREC)))
-            addhit(pid, va - 32 + (u32)j);
+        for (int l = 0; l < NLAB; l++)
+            if (pg[j] == labs[l].old[0] && (same(pg + j, labs[l].old, labs[l].n) || same(pg + j, labs[l].nw, labs[l].n)))
+                addhit(pid, va - 32 + (u32)j, l);
 }
 
 /* walks the present pages of the mappings in rs/rend of process pid looking for the label record (old or
@@ -594,20 +613,20 @@ static int search(int all) {
     return np_;
 }
 
-/* what a hit holds now: 2 = the new text, 3 = the old text, 0 = something else / gone, -1/-2 errors (vrw) */
-static int labstate(int pid, u32 va) {
-    u8 b[LREC];
-    int r = vrw(pid, va, b, LREC, 0);
+/* what a hit (of label l) holds now: 2 = the new text, 3 = the old text, 0 = something else / gone, -1/-2 errors (vrw) */
+static int labstate(int pid, u32 va, int l) {
+    u8 b[LREC]; const struct lab *L = &labs[l];
+    int r = vrw(pid, va, b, L->n, 0);
     if (r <= 0) return r;
-    return same(b, lab_new, LREC) ? 2 : same(b, lab_old, LREC) ? 3 : 0;
+    return same(b, L->nw, L->n) ? 2 : same(b, L->old, L->n) ? 3 : 0;
 }
 /* like labstate, but writes the new text over the old: 1 = renamed just now */
-static int labfix(int pid, u32 va) {
-    int r = labstate(pid, va);
+static int labfix(int pid, u32 va, int l) {
+    int r = labstate(pid, va, l);
     if (r != 3) return r;
-    r = vrw(pid, va + 4, (u8 *)lab_new + 4, LREC - 4, 1);    /* the text only, the id stays */
+    r = vrw(pid, va + 4, (u8 *)labs[l].nw + 4, labs[l].n - 4, 1);    /* the text only, the id stays */
     if (r <= 0) return r;
-    return labstate(pid, va) == 2 ? 1 : -2;
+    return labstate(pid, va, l) == 2 ? 1 : -2;
 }
 
 static void uistatus(const char *s) { statusto(UISTATUS, UISTATUS ".t", s); }
@@ -635,16 +654,16 @@ static int label(void) {
             procs = search(0);
             mb = scanned >> 8;
             if (!procs) next = t + 5;                       /* no UI yet */
-            else if (nhits) { next = t + 150; wait = 5; }   /* found: look for other copies every 5 minutes */
+            else if (labsfound()) { next = t + 150; wait = 5; }   /* found: look for other copies every 5 minutes */
             else { next = t + wait; wait = wait < 15 ? wait * 2 : 30; }
-        } else if (!nhits && np_ == 1 && readmaps(plist[0]) == 0 && isui) {
+        } else if (!labsfound() && np_ == 1 && readmaps(plist[0]) == 0 && isui) {
             /* in between: look only at memory the UI has just taken into use (where newly loaded strings are) */
             scanpid(plist[0], 0);
-            if (nhits) { next = t + 150; wait = 5; }
+            if (labsfound()) { next = t + 150; wait = 5; }
         }
         int on = 0, err = 0;
         for (int i = 0; i < nhits; ) {
-            int r = labfix(hpid[i], hva[i]);
+            int r = labfix(hpid[i], hva[i], hlab[i]);
             if (r == -2) { err = 1; i++; continue; }
             if (r <= 0) { delhit(i); if (!nhits) { next = t + 1; wait = 5; } continue; }
             on++; i++;
@@ -675,7 +694,7 @@ static int labshow(int all) {
     outn((u32)procs); out(all ? " processes" : " UI process(es)");
     for (int i = 0; i < nhits; i++) {
         u32 pa = 0; v2p(hpid[i], hva[i], &pa);
-        int s = labstate(hpid[i], hva[i]);
+        int s = labstate(hpid[i], hva[i], hlab[i]);
         out("; pid "); outn((u32)hpid[i]); out(" va "); outx(hva[i]); out(" pa "); outx(pa);
         out(s == 2 ? " new" : s == 3 ? " old" : " gone");
     }
@@ -1669,7 +1688,126 @@ static u32 manualfl(void) {
     u32 mm = steadyshot();
     return (pread_(MOUNT, mnt, 4) == 0 && rd32(mnt) == 0 && mm > 0 && mm < 10000) ? mm : 0;
 }
-static int h24n;                      /* the 24 hour time: how many of its patches are ours (hN in the status) */
+/* The peaking colour for the menu's "Custom" (Sony's Yellow; pics.c): /android/dev/a7hacks.pk, written by the
+ * app, "YYCBCR" (Y, Cb, Cr in hex, BT.601 as the camera uses them). None (or nonsense): Sony's Yellow. Sets pkon,
+ * pkw; 1 = changed. */
+static int pkread(void) {
+    char t[16]; int on = 0; u8 w[4] = {0, 0, 0, 0};
+    int f = sc(SYS_OPEN, (long)PKFILE, 0, 0, 0, 0);
+    if (f >= 0) {
+        int n = sc(SYS_READ, f, (long)t, sizeof t, 0, 0);
+        sc(SYS_CLOSE, f, 0, 0, 0, 0);
+        if (n >= 6) {
+            on = 1;
+            for (int i = 0; i < 6; i++) if (hexv(t[i]) < 0) on = 0;
+            for (int i = 6; i < n; i++) if (t[i] != '\n' && t[i] != '\r' && t[i] != ' ') on = 0;
+            if (on) for (int c = 0; c < 3; c++) w[2 - c] = (u8)(hexv(t[2 * c]) << 4 | hexv(t[2 * c + 1]));
+        }
+    }
+    int ch = on != pkon || (on && (w[0] != pkw[0] || w[1] != pkw[1] || w[2] != pkw[2]));
+    pkon = on; for (int i = 0; i < 4; i++) pkw[i] = on ? w[i] : 0;
+    return ch;
+}
+/* While the camera shows peaking in the colour that was ours, the new one goes there at once too, so the app's
+ * colour picker shows on the camera as it's moved: into av-cam's copies of the peaking settings it last got
+ * (VDF's own per output, the display driver's latest-command holder and two more copies of it, the copy its
+ * display task received, and that task's two states with two outputs each; each a word Y, Cb, Cr, colorimetry), which it applies again on its own (a switch
+ * between LCD and EVF), and into the display hardware's colour register (channel A at 0xf3445148: Y, Cb, Cr in
+ * bits 31..8). Each only if it holds exactly the colour that was ours (any other colour there, Sony's, or
+ * Custom not chosen, stays: the camera takes the new one the next time it sets peaking), av-cam's only once
+ * checksigs found its code the one we know (pkav). was, now: 0xYYCBCR. */
+#define PKREG 0xf3445148u
+/* av-cam's copies are found by their shape: in a peaking block a colour word (Y, Cb, Cr, colorimetry 0x40 or
+ * 0x41) follows the words on/off (0, 1), level (1..11), 0, 0 and is followed by 0; taken only when it holds
+ * exactly the colour that was ours. Where they were (two areas of av-cam's data) is looked through at every
+ * change, all of av-cam's data once the colour has stayed put a moment (pkall). */
+static u8 pkpg[4096];
+static void pkavscan(u32 lo, u32 hi, u32 was, u32 now) {
+    for (u32 a = lo; a < hi; a += 4096) {
+        if (pread_(a, pkpg, 4096) < 0) return;
+        for (u32 o = 16; o + 8 <= 4096; o += 4) {
+            const u8 *c = pkpg + o;
+            if (c[0] != (u8)(was >> 16) || c[1] != (u8)(was >> 8) || c[2] != (u8)was || (c[3] & 0xfe) != 0x40) continue;
+            u32 on = rd32(c - 16), lv = rd32(c - 12);
+            if (on > 1 || lv < 1 || lv > 11 || rd32(c - 8) || rd32(c - 4) || rd32(c + 4)) continue;
+            u8 w[3] = {(u8)(now >> 16), (u8)(now >> 8), (u8)now};
+            hold(1); pwrite_(a + o, w, 3); hold(0);
+        }
+    }
+}
+static int pkav;
+/* and libObj's own copy (it doesn't look the colour up again until the menu changes): a table in the UI's heap of 8 records of 7 bytes (02 00 Y Cb Cr output on/off), one per output and state.
+ * Found by looking for 8 records holding the colour that was ours, once the colour has stayed put a moment (then
+ * kept, and checked again before each use). */
+#define PKREC 7
+#define PKNREC 8
+static int pkuipid; static u32 pkuiva;
+static int pktable(int pid, u32 va, u32 was) {       /* do the 8 records at va hold was? */
+    u8 b[PKREC * PKNREC];
+    if (vrw(pid, va, b, sizeof b, 0) <= 0) return 0;
+    for (int i = 0; i < PKNREC; i++) {
+        const u8 *r = b + i * PKREC;
+        if (r[2] != (u8)(was >> 16) || r[3] != (u8)(was >> 8) || r[4] != (u8)was) return 0;
+    }
+    return 1;
+}
+static void pkfindui(u32 was) {
+    pkuipid = 0;
+    findprocs(0);
+    if (!np_) return;
+    int pid = plist[0];
+    heaponly = 1; int r = readmaps(pid); heaponly = 0;
+    if (r < 0) return;
+    for (int k = 0; k < nrng; k++)
+        for (u32 va = rs[k]; va < rend[k]; va += 4096) {
+            u32 pa; if (v2p(pid, va, &pa) <= 0) continue;
+            if (pread_(pa, pg + 32, 4096) < 0) continue;
+            for (int j = 32; j + 2 + 3 <= 32 + 4096; j++)
+                if (pg[j + 2] == (u8)(was >> 16) && pg[j + 3] == (u8)(was >> 8) && pg[j + 4] == (u8)was
+                    && pktable(pid, va + (u32)(j - 32), was)) { pkuipid = pid; pkuiva = va + (u32)(j - 32); return; }
+        }
+}
+static void pkshow(u32 was, u32 now, int full) {
+    if (!pkuipid || !pktable(pkuipid, pkuiva, was)) { pkuipid = 0; if (full) pkfindui(was); }
+    if (pkuipid) for (int i = 0; i < PKNREC; i++) {
+        u8 w[3] = {(u8)(now >> 16), (u8)(now >> 8), (u8)now};
+        hold(1); vrw(pkuipid, pkuiva + (u32)(i * PKREC) + 2, w, 3, 1); hold(0);
+    }
+    if (pkav && full) pkavscan(0x83dc0000u, 0x841c1000u, was, now);
+    else if (pkav) { pkavscan(0x83ee0000u, 0x83f00000u, was, now); pkavscan(0x83fb0000u, 0x83fc0000u, was, now); }
+    int f = sc(SYS_OPEN, (long)"/dev/mem", 0x101002 /* O_RDWR | O_SYNC */, 0, 0, 0);
+    if (f < 0) return;
+    long m = sc6(SYS_MMAP2, 0, 0x1000, 3 /* PROT_READ | PROT_WRITE */, 1 /* MAP_SHARED */, f, (long)(PKREG >> 12));
+    sc(SYS_CLOSE, f, 0, 0, 0, 0);
+    if ((unsigned long)m >= 0xfffff000ul) return;
+    volatile u32 *r = (volatile u32 *)(m + (PKREG & 0xfffu));
+    u32 v = *r;
+    if (v >> 8 == (was & 0xffffff)) *r = (now & 0xffffff) << 8 | (v & 0xff);
+    sc(SYS_MUNMAP, m, 0x1000, 0, 0, 0);
+}
+/* a new colour from the app: into the lookup (clock24), and onto the screen if it shows the one before */
+static int h24n;
+#define PKSONY 0x1d21092u                /* Sony's Yellow: Y 0xd2, Cb 0x10, Cr 0x92 */
+static u32 pkfirst, pkquiet;            /* the colour before a run of changes (for the full pass), quiet ticks */
+static void pkupdate(void) {
+    u32 was = pkin;
+    if (!pkread()) {                     /* the colour has stayed put a second: all of av-cam's data once */
+        if (pkfirst && ++pkquiet >= 4) {
+            u32 to = pkin ? pkin : PKSONY;
+            if (pkfirst != to) pkshow(pkfirst, to, 1);
+            pkfirst = 0;
+        }
+        return;
+    }
+    h24n = clock24(1);
+    /* Sony's Yellow (only that menu colour gives it) stands for ours when ours comes in or goes */
+    u32 from = was ? was : PKSONY, to = pkin ? pkin : PKSONY;
+    if (from != to && (was || pkin)) {
+        pkshow(from, to, 0);
+        if (!pkfirst) pkfirst = from;
+        pkquiet = 0;
+    }
+}
 static void ftreport(char *st, char *last, int left, int done, int total, int cache, int labels, int pics,
                      u32 pdone, int pleft, int acc, int icons, int noicons) {
     int k = 0;
@@ -1688,7 +1826,8 @@ static void ftreport(char *st, char *last, int left, int done, int total, int ca
         if (pics && acc > 0) { k = scat(st, k, " a"); k = scatn(st, k, (u32)acc); }
         if (pics && h24n > 0) { k = scat(st, k, " h"); k = scatn(st, k, (u32)h24n); }
         if (pics && irisin > 0) { k = scat(st, k, " i"); k = scatn(st, k, irisin); }
-        else if (icons) k = scat(st, k, " nopics");
+        if (!pics && icons) k = scat(st, k, " nopics");
+        if (pics && pkin) { k = scat(st, k, " k"); char x[7]; for (int i = 0; i < 6; i++) x[i] = "0123456789abcdef"[(pkin >> (20 - 4 * i)) & 15]; x[6] = 0; k = scat(st, k, x); }
         if (pics && texd >= 0) { k = scat(st, k, " g"); k = scatn(st, k, (u32)(texd + (texe > 0 ? texe : 0))); }
         if (noicons && icons) k = scat(st, k, " noicons");
         if (tookf) { k = scat(st, k, " f"); k = scatn(st, k, tookf); }
@@ -1739,6 +1878,7 @@ static int font(int on, int icons) {
     texd = -2; u32 texd2 = 0;         /* textures brought up to date (-2: not looked yet, -1: can't), next look */
     texe = -1;                        /* -1: the first pictures aren't all in yet */
     int mountok = checksigs() > 0;    /* the camera's code is the one we know: MOUNT (the lens mount) can be read */
+    pkav = mountok;                   /* and the peaking colour copies in av-cam */
     u32 t0 = secs(); tookf = tookp = 0;   /* for the time it takes (fF, sS in the status) */
     sc(SYS_NICE, 19, 0, 0, 0, 0);     /* the camera comes first: unpacking and packing pictures takes a while */
     char last[80]; last[0] = 0;
@@ -1762,6 +1902,7 @@ static int font(int on, int icons) {
         }
         int acc = pics ? colours(1) : 0;      /* the text accent colour too */
         irisfl = pics && mountok ? manualfl() : 0;   /* a lens that tells no aperture: its focal length for F-- */
+        if (pics) pkupdate();                 /* the peaking colour for Custom (and Sony's copies of it) */
         h24n = pics ? clock24(1) : 0;         /* and the time in 24 hours */
         int pleft = 0;
         if (pics && pics_state != 2) {         /* a batch at a time; once all are in, the label store's copies go */
@@ -1806,15 +1947,18 @@ static int font(int on, int icons) {
         /* while pictures are left only a moment (nice 19 already lets the camera go first): a quarter second
          * after every batch was about 50 s of the patcher's time */
         long ts[2] = {pleft ? 0 : left ? 1 : 10, pleft ? 10000000 : 0};
-        if (ts[0] == 10 && pics && mountok) {
-            /* the 10 s between passes a second at a time: a new focal length (the SteadyShot setting, read every
-             * second) gets to the label at once, so it's there when the camera next draws it */
-            for (int w = 0; w < 10; w++) {
-                long one[2] = {1, 0};
-                sc(SYS_NANOSLEEP, (long)one, 0, 0, 0, 0);
-                u32 nf = manualfl();
-                if (nf != irisfl) {
-                    irisfl = nf; h24n = clock24(1);
+        if (ts[0] == 10 && pics) {
+            /* the 10 s between passes a second at a time (a quarter: the colour, while the app's picker moves): a
+             * new focal length (the SteadyShot setting, read every second) gets to the label at once, so it's there
+             * when the camera next draws it, and a new peaking colour to the camera */
+            for (int w = 0; w < 40; w++) {
+                long q[2] = {0, 250000000};
+                sc(SYS_NANOSLEEP, (long)q, 0, 0, 0, 0);
+                u32 nf = mountok && (w & 3) == 3 ? manualfl() : irisfl, pk = pkin;
+                int ch = nf != irisfl;
+                if (ch) { irisfl = nf; h24n = clock24(1); }
+                pkupdate();
+                if (ch || pk != pkin) {
                     char st2[80];
                     ftreport(st2, last, left, done, total, cache, labels, pics, pdone, pleft, acc, icons, noicons);
                 }
@@ -1926,7 +2070,7 @@ static int setclock(void) {
 }
 
 /* --memory-changes start len [ms]: which 64 KB blocks of physical memory change (for finding the live view's
- * buffers, which belong to the other CPU: no Linux process maps them). start and len in hex, whole blocks, in RAM;
+ * buffers, which av-cam fills from inside the kernel: no Linux process maps them). start and len in hex, whole blocks, in RAM;
  * ms (decimal, default 100) between the two passes. Read only: /dev/mem is opened read only; each block is read
  * twice and hashed. Prints one line per MB: its address, then one character per block: C changed, 0 all zero,
  * a untouched since power-on (DRAM's 0xaa pattern with a few bits flipped), . the same both times; and the time
@@ -1976,6 +2120,90 @@ static int memchanges(const char *s, const char *l, const char *m) {
     return 0;
 }
 
+/* --ui-find hex: where in the camera UI's own data (its [heap] and anonymous writable memory, pages in
+ * RAM only) a byte string (1..16 bytes, in hex) is; prints each hit's virtual address and the 32 bytes around
+ * it. Read only. Hits that cross a page edge are missed. */
+static int uifind(const char *h) {
+    u8 pat[16]; int n = 0;
+    for (const char *p = h; *p && p[1]; p += 2) {
+        if (n >= 16 || hexv(p[0]) < 0 || hexv(p[1]) < 0) { out("error usage"); return 1; }
+        pat[n++] = (u8)(hexv(p[0]) << 4 | hexv(p[1]));
+    }
+    if (!n) { out("error usage"); return 1; }
+    fd = sc(SYS_OPEN, (long)"/dev/mem", 0, 0, 0, 0);
+    if (fd < 0) { out("error open /dev/mem"); return 2; }
+    findprocs(0);
+    if (!np_) { out("noui"); return 2; }
+    int pid = plist[0], hits = 0;
+    heaponly = 1; readmaps(pid); heaponly = 0;
+    for (int k = 0; k < nrng && hits < 64; k++)
+        for (u32 va = rs[k]; va < rend[k] && hits < 64; va += 4096) {
+            u32 pa; if (v2p(pid, va, &pa) <= 0) continue;
+            if (pread_(pa, pg + 32, 4096) < 0) continue;
+            for (int j = 32; j + n <= 32 + 4096 && hits < 64; j++) {
+                if (!same(pg + j, pat, n)) continue;
+                hits++;
+                sayx(va + (u32)(j - 32)); say(":");
+                int a = j - 16 < 32 ? 32 : j - 16, b = j + 16 > 32 + 4096 ? 32 + 4096 : j + 16;
+                for (int i = a; i < b; i++) { say(i == j ? " [" : " "); char c[3] = {"0123456789abcdef"[pg[i] >> 4], "0123456789abcdef"[pg[i] & 15], 0}; say(c); }
+                say("\n");
+            }
+        }
+    out("hits "); outn((u32)hits);
+    return 0;
+}
+
+/* --mem-find hex start len: where in physical RAM (start, len in hex, whole pages) a byte string (1..16
+ * bytes) is; prints each hit's address and the 32 bytes around it (at most 64 hits). Read only. */
+static int memfind(const char *h, const char *s0, const char *l0) {
+    u8 pat[16]; int n = 0; u32 st = 0, ln = 0;
+    for (const char *p = h; *p && p[1]; p += 2) {
+        if (n >= 16 || hexv(p[0]) < 0 || hexv(p[1]) < 0) { out("error usage"); return 1; }
+        pat[n++] = (u8)(hexv(p[0]) << 4 | hexv(p[1]));
+    }
+    for (const char *p = s0; *p; p++) { if (hexv(*p) < 0) { out("error usage"); return 1; } st = st << 4 | (u32)hexv(*p); }
+    for (const char *p = l0; *p; p++) { if (hexv(*p) < 0) { out("error usage"); return 1; } ln = ln << 4 | (u32)hexv(*p); }
+    if (!n || !ln || (st | ln) & 0xfff) { out("error usage"); return 1; }
+    if (st - RAM_LO >= RAM_SIZE || RAM_SIZE - (st - RAM_LO) < ln) { out("error not in RAM"); return 2; }
+    fd = sc(SYS_OPEN, (long)"/dev/mem", 0, 0, 0, 0);
+    if (fd < 0) { out("error open /dev/mem"); return 2; }
+    int hits = 0;
+    for (u32 a = st; a - st < ln && hits < 64; a += 4096) {
+        if (pread_(a, pg + 32, 4096) < 0) { out("error read"); return 2; }
+        for (int j = 32; j + n <= 32 + 4096 && hits < 64; j++) {
+            if (!same(pg + j, pat, n)) continue;
+            hits++;
+            sayx(a + (u32)(j - 32)); say(":");
+            int x = j - 16 < 32 ? 32 : j - 16, y = j + 16 > 32 + 4096 ? 32 + 4096 : j + 16;
+            for (int i = x; i < y; i++) { say(i == j ? " [" : " "); char c[3] = {"0123456789abcdef"[pg[i] >> 4], "0123456789abcdef"[pg[i] & 15], 0}; say(c); }
+            say("\n");
+        }
+    }
+    out("hits "); outn((u32)hits);
+    return 0;
+}
+
+/* --reg-read addr n: n 32-bit hardware registers from addr on (hex both; for the display hardware's peaking and
+ * zebra registers at 0xf3445100 / 0xf3446100, set by av-cam). Read only: /dev/mem opened read only, one page mapped
+ * uncached (O_SYNC) and read, and only I/O space (0xf0000000 and up, never RAM) within that one page. /dev/mem's
+ * read() refuses addresses above RAM ("Bad address"), hence the mapping. Prints "addr value" per register. */
+static int regread(const char *s, const char *l) {
+    u32 a = 0, n = 0;
+    for (const char *p = s; *p; p++) { int v = hexv(*p); if (v < 0) { out("error usage"); return 1; } a = a << 4 | (u32)v; }
+    for (const char *p = l; *p; p++) { int v = hexv(*p); if (v < 0) { out("error usage"); return 1; } n = n << 4 | (u32)v; }
+    if (!*s || !*l || !n || a & 3 || n > 1024) { out("error usage"); return 1; }
+    if (a < 0xf0000000u || (a & 0xfffu) + n * 4 > 0x1000u) { out("error not in one page of I/O space"); return 2; }
+    int f = sc(SYS_OPEN, (long)"/dev/mem", 0x101000 /* O_RDONLY | O_SYNC */, 0, 0, 0);
+    if (f < 0) { out("error open /dev/mem"); return 2; }
+    long m = sc6(SYS_MMAP2, 0, 0x1000, 1 /* PROT_READ */, 1 /* MAP_SHARED */, f, (long)(a >> 12));
+    sc(SYS_CLOSE, f, 0, 0, 0, 0);
+    if ((unsigned long)m >= 0xfffff000ul) { out("error mmap"); return 2; }
+    const volatile u32 *r = (const volatile u32 *)(m + (a & 0xfffu));
+    for (u32 i = 0; i < n; i++) { u32 v = r[i]; sayx(a + i * 4); say(" "); sayx(v); say("\n"); }
+    sc(SYS_MUNMAP, m, 0x1000, 0, 0, 0);
+    return 0;
+}
+
 /* When this helper was built: "yyyy-mm-dd HH:MM:SS", UTC (Gradle's buildHelper passes it). --version prints it; the
  * app runs that (as itself, no root needed) for its info dialog. */
 #ifndef A7_BUILT
@@ -1998,6 +2226,9 @@ static int run(int argc, char **argv) {
     if (argc == 2 && eq(o, "--pic-bench")) return bench();
     if (eq(o, "--memory-dump") && (argc == 3 || (argc == 4 && eq(argv[3], "--all")))) return memdump(argv[2], argc == 4);
     if (eq(o, "--memory-changes") && (argc == 4 || argc == 5)) return memchanges(argv[2], argv[3], argc == 5 ? argv[4] : 0);
+    if (argc == 4 && eq(o, "--reg-read")) return regread(argv[2], argv[3]);
+    if (argc == 3 && eq(o, "--ui-find")) return uifind(argv[2]);
+    if (argc == 5 && eq(o, "--mem-find")) return memfind(argv[2], argv[3], argv[4]);
     if (eq(o, "--glyph-cache")) {
         int mode = 0;
         for (int i = 2; i < argc; i++) {

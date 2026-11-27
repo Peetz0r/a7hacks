@@ -84,6 +84,17 @@ public class MainActivity extends Activity {
         pp.setMargins(0, 0, 24, 0);
         bottom.addView(progress, pp);
         showProgress(null);
+        // focus peaking's custom colour: a square in that colour, like a player's stop symbol
+        final ImageButton peaking = (ImageButton) iconButton(0, "Focus peaking custom color");
+        peaking.setImageDrawable(PeakingColor.symbol(this, PeakingColor.get(this)));
+        peaking.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                PeakingColor.pick(MainActivity.this, new Runnable() {
+                    public void run() { peaking.setImageDrawable(PeakingColor.symbol(MainActivity.this, PeakingColor.get(MainActivity.this))); }
+                });
+            }
+        });
+        bottom.addView(peaking);
         // restart and info: icons from the system (public since API 1, so the camera's Android has them)
         View restart = iconButton(android.R.drawable.ic_menu_rotate, "Restart");
         restart.setOnClickListener(new View.OnClickListener() {
@@ -114,7 +125,7 @@ public class MainActivity extends Activity {
      *  below it, its background image (a nine-patch) gets drawn with its edges through the middle. */
     private View iconButton(int icon, String description) {
         ImageButton b = new ImageButton(this);
-        b.setImageResource(icon);
+        if (icon != 0) b.setImageResource(icon);
         b.setContentDescription(description);
         b.setPadding(24, b.getPaddingTop(), 24, b.getPaddingBottom());
         return b;

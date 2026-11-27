@@ -182,6 +182,7 @@ public class StartService extends Service {
         String summerZone = null;              // the timezone the summer time was configured with
         final String clockOld = Starter.clockStatus();   // an answer from before (a restart): not news
         AppLog.add("started");
+        PeakingColor.apply(ctx);               // focus peaking's custom colour, for the helper (RAM: gone at a reboot)
         while (true) {
             try {
                 if (restartRequested) {

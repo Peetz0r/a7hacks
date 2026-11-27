@@ -320,6 +320,7 @@ static struct h24f { const char *path; u32 size, page, hash; const u8 *map; } h2
     {PICDIR "viewStlrec.uxc", 19504u, 0x1000u, 0x7061d7feu, 0},
     {PICDIR "viewStlrec.uxc", 19504u, 0x3000u, 0xaf949fccu, 0},
     {"/usr/lib/viewUnified2.so", 5317568u, 0x11f000u, 0x5a8e6b1eu, 0},
+    {"/usr/lib/libObj.so", 16454084u, 0x3e9000u, 0xdd39ba51u, 0},
 };
 /* kind: H24 the time in 24 hours (always); IRIS_T, IRIS_W the focal length where live view says F-- (only with a
  * lens that tells no aperture: see irisfl below), IRIS_W a code word written at once; IRIS_S always Sony's (it was
@@ -329,6 +330,8 @@ static struct h24f { const char *path; u32 size, page, hash; const u8 *map; } h2
 #define IRIS_S 2
 #define IRIS_W 3
 #define LAY 4
+#define PKC 5
+#define PKL 6
 static const struct h24p { int f; u32 off; u8 n, kind, old[4], nw[4]; } h24ps[] = {
     {0, 0x26142u, 2, H24, {0x03, 0x2d}, {0x03, 0x25}},     /* cmp r5, #3  ->  movs r5, #3 */
     {0, 0x26148u, 2, H24, {0x2d, 0xd0}, {0x2d, 0xe0}},     /* beq (24 hours)  ->  b */
@@ -374,11 +377,32 @@ static const struct h24p { int f; u32 off; u8 n, kind, old[4], nw[4]; } h24ps[] 
     {8, 0x11f1bau, 4, LAY, {0x41, 0xeb, 0x0c, 0x01}, {0x00, 0xbf, 0x00, 0xbf}},  /* EVF: 5 -> 4, 5 */
     {8, 0x11f1b6u, 4, LAY, {0xdc, 0xf1, 0x00, 0x01}, {0xc9, 0x07, 0xc9, 0x0f}},  /*   r1 = (0x30 >> mode) & 1, as above */
     {8, 0x11f1b2u, 4, LAY, {0xa0, 0xf1, 0x05, 0x0c}, {0x30, 0x21, 0xc1, 0x40}},
+    /* Focus peaking's third colour ("Yellow", the menu says "Custom": the label patcher) is ours. libObj's
+     * peaking colour lookup (0x3e96a4, every caller goes through it) takes each menu colour's Y, Cb, Cr from the
+     * camera's backup settings (Bkup_Read: White 0x01070418, Red 0x01070367, Yellow 0x01070368, a word Y << 16 |
+     * Cb << 8 | Cr), and the renderer sends them on to av-cam's display hardware. For Yellow ours: the word comes
+     * from that lookup's literal pool, where Yellow's backup id was (PKL, pkw: the colour asked for), and goes on
+     * through Sony's own stores as if the backup had said so. Our code is where an impossible colour (not 0..2)
+     * was logged; such a colour still fails, unlogged. Ours in order (the code, the word, the branch to it), Sony's
+     * back the other way round, so the word is only taken for a colour while the branch is ours (until then
+     * Yellow would read a backup id that isn't there: no colour change, at worst for a moment). */
+    {9, 0x3e96d6u, 2, PKC, {0x1e, 0x49}, {0x00, 0x24}},     /* movs r4, #0 (an impossible colour: fails) */
+    {9, 0x3e96d8u, 2, PKC, {0x38, 0x1d}, {0x19, 0xe0}},     /*   b 0x3e970e (Sony's "colour failed") */
+    {9, 0x3e96dau, 2, PKC, {0x79, 0x44}, {0x1b, 0x4b}},     /* Yellow: ldr r3, =colour (0x3e9748) */
+    {9, 0x3e96dcu, 2, PKC, {0x4a, 0xf0}, {0xfb, 0x60}},     /*   str r3, [r7, #0xc] (where Bkup_Read puts it) */
+    {9, 0x3e96deu, 2, PKC, {0x77, 0xfa}, {0x01, 0x24}},     /*   movs r4, #1 */
+    {9, 0x3e96e0u, 2, PKC, {0x00, 0x20}, {0x0a, 0xe0}},     /*   b 0x3e96f8 (Sony's stores of Y, Cb, Cr) */
+    {9, 0x3e9748u, 4, PKL, {0x68, 0x03, 0x07, 0x01}, {0}},  /* Yellow's backup id 0x01070368  ->  the colour */
+    {9, 0x3e96c8u, 2, PKC, {0x0d, 0xd0}, {0x07, 0xd0}},     /* cmp r5, #2: beq 0x3e96e6 (Bkup_Read)  ->  beq 0x3e96da */
 };
 #define NH24F ((int)(sizeof h24fs / sizeof h24fs[0]))
 #define NH24P ((int)(sizeof h24ps / sizeof h24ps[0]))
-/* is q (n bytes) ours for place P: its new bytes, or for IRIS_S 1..4 digits padded with NULs */
+/* the peaking colour asked for, as the literal's bytes (Cr, Cb, Y, 0); pkon: one is asked for (a7hacks.pk) */
+static u8 pkw[4]; static int pkon;
+/* is q (n bytes) ours for place P: its new bytes, for PKL any colour word (top byte 0: Sony's is a backup id,
+ * 0x01......), or for IRIS_S 1..4 digits padded with NULs */
 static int h24ours(const struct h24p *P, const u8 *q) {
+    if (P->kind == PKL) return q[3] == 0;
     if (P->kind != IRIS_S) { for (int j = 0; j < P->n; j++) if (q[j] != P->nw[j]) return 0; return 1; }
     int d = 0; while (d < P->n && q[d] >= '0' && q[d] <= '9') d++;
     if (!d) return 0;
@@ -395,6 +419,7 @@ static int h24ours(const struct h24p *P, const u8 *q) {
  * such a lens its filter lets every event through. irisfl: that focal length (the helper's own reading; it only
  * decides ours or Sony's now), 0 for Sony's. */
 static u32 irisfl, irisin;              /* irisin: the focal length the label has been given (status iN) */
+static u32 pkin;                        /* 0x1YYCBCR: the peaking colour that is in (status k), 0: Sony's */
 static int clock24(int on) {
     static u8 b[4096];
     int ok[NH24F];
@@ -434,17 +459,18 @@ static int clock24(int on) {
             int k = pass ? x : NH24P - 1 - x;
             const struct h24p *P = &h24ps[k];
             struct h24f *F = &h24fs[P->f];
-            int mine = (P->kind == H24 || P->kind == LAY) ? on : P->kind == IRIS_S ? 0 : (on && irisfl > 0 && irisfl < 10000);
+            int mine = (P->kind == H24 || P->kind == LAY) ? on : P->kind == IRIS_S ? 0
+                     : (P->kind == PKC || P->kind == PKL) ? (on && pkon) : (on && irisfl > 0 && irisfl < 10000);
             if (mine != pass) continue;
             if (!ok[P->f]) { bad = -2; continue; }        /* not the library we know: leave it */
-            const u8 *want = !mine ? P->old : P->nw;
+            const u8 *want = !mine ? P->old : P->kind == PKL ? pkw : P->nw;
             u8 *q = (u8 *)F->map + (P->off - F->page);
             int same = 1;
             for (int j = 0; j < P->n; j++) if (q[j] != want[j]) same = 0;
             if (!same) {
                 int r = 1;
                 hold(1);
-                if (P->kind == IRIS_W) r = vrw(mypid, (u32)(unsigned long)q, (u8 *)want, P->n, 1);   /* one aligned word */
+                if (P->kind == IRIS_W || P->kind == PKL) r = vrw(mypid, (u32)(unsigned long)q, (u8 *)want, P->n, 1);   /* one aligned word */
                 else for (int j = 0; j < P->n && r > 0; j++) {  /* a byte at a time: low first, Sony's back high first */
                     int bb = mine ? j : P->n - 1 - j;
                     if (q[bb] != want[bb]) r = vrw(mypid, (u32)(unsigned long)(q + bb), (u8 *)want + bb, 1, 1);
@@ -462,6 +488,11 @@ static int clock24(int on) {
           if (P->kind != IRIS_T && P->kind != IRIS_W) continue;
           all++; if (h24fs[P->f].map && h24ours(P, h24fs[P->f].map + (P->off - h24fs[P->f].page))) t++; }
       if (t == all && on) irisin = irisfl; }
+    pkin = 0;                                    /* every peaking place ours: the colour (status kYYCBCR) */
+    { int t = 0, all = 0; for (int k = 0; k < NH24P; k++) { const struct h24p *P = &h24ps[k];
+          if (P->kind != PKC && P->kind != PKL) continue;
+          all++; if (h24fs[P->f].map && h24ours(P, h24fs[P->f].map + (P->off - h24fs[P->f].page))) t++; }
+      if (t == all && on && pkon) pkin = 0x1000000u | (u32)pkw[2] << 16 | (u32)pkw[1] << 8 | pkw[0]; }
     if (!on) for (int f = 0; f < NH24F; f++) if (h24fs[f].map) { sc(SYS_MUNMAP, (long)h24fs[f].map, 4096, 0, 0, 0); h24fs[f].map = 0; }
     return n ? n : bad;
 }

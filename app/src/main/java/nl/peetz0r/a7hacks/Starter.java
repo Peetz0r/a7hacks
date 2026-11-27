@@ -38,10 +38,14 @@ public class Starter {
     }
 
     /** Starts "tool option" as a root loop in the background, unless the one in the pid file
-     *  /android/dev/a7hacks.KIND.p still runs. */
+     *  /android/dev/a7hacks.KIND.p still runs. One that runs from a helper an update has replaced (its program
+     *  "(deleted)") is stopped first and started anew from the new one: the camera's app storage is vfat, which
+     *  frees a deleted file's space only when the last process using it ends, and the camera never ends them (it
+     *  boots from a snapshot), so each update that left the old loops running lost 4.4 MB for good (until a
+     *  dosfsck). A loop still busy writing holds off its stop a moment: then the next try (30 s on) starts it. */
     private static void startLoop(String tool, String option, String kind) throws NativeException {
-        String cmd = "cd /android/dev;read p<a7hacks." + kind + ".p;if [ -n \"$p\" ]&&[ -d /proc/$p ];then :;else "
-            + tool + " " + option + " >/dev/null 2>&1 &echo $!>a7hacks." + kind + ".p;fi";
+        String cmd = "cd /android/dev;read p<a7hacks." + kind + ".p;ls -l /proc/$p/exe|grep -q eted&&kill $p&&sleep 1;"
+            + "[ -e /proc/$p/exe ]||{ " + tool + " " + option + " >/dev/null 2>&1 &echo $!>a7hacks." + kind + ".p;}";
         if (cmd.length() > MAX_COMMAND) throw new NativeException("command too long");
         Shell.exec(cmd);
     }

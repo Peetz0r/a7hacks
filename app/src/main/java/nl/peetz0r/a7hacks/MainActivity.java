@@ -1,10 +1,12 @@
 package nl.peetz0r.a7hacks;
 
+import android.app.ActionBar;
 import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.view.Gravity;
+import android.util.TypedValue;
 import android.view.KeyEvent;
 import android.view.View;
 import android.widget.ImageButton;
@@ -15,7 +17,11 @@ import android.widget.TableLayout;
 import android.widget.TableRow;
 import android.widget.TextView;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.TreeMap;
 
 public class MainActivity extends Activity {
@@ -33,6 +39,22 @@ public class MainActivity extends Activity {
     private TreeMap<Integer, LensProfiles.Profile> shownProfiles;
     private final Handler handler = new Handler();
     private boolean resumed = false;
+
+    /** The clock at the right of the title bar, yyyy-mm-dd HH:MM:SS: Linux's clock (the helper sets it from the
+     *  camera's) in the camera's time zone, which the app sets for itself (AppLog.setZone: Android has none), so
+     *  summer time too. TextClock needs Android 4.2; the camera has 4.1. Updated just after each second begins,
+     *  while shown. */
+    private TextView clock;
+    private final SimpleDateFormat clockFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);
+    private final Runnable ticker = new Runnable() {
+        public void run() {
+            if (!resumed || clock == null) return;
+            long now = System.currentTimeMillis();
+            clockFormat.setTimeZone(TimeZone.getDefault());
+            clock.setText(clockFormat.format(new Date(now)));
+            handler.postDelayed(this, 1000 - now % 1000 + 20);
+        }
+    };
 
     private final Runnable refresher = new Runnable() {
         public void run() {
@@ -114,7 +136,17 @@ public class MainActivity extends Activity {
 
         setContentView(root);
         // the title in Comic too; the theme leaves it out of the action bar (see styles.xml), so it's switched on here
-        if (getActionBar() != null) getActionBar().setDisplayShowTitleEnabled(true);
+        ActionBar bar = getActionBar();
+        if (bar != null) {
+            bar.setDisplayShowTitleEnabled(true);
+            clock = new TextView(this);
+            Fonts.comic(clock, false);
+            clock.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);   // as the title (Holo's action bar title: 18sp)
+            clock.setPadding(0, 0, 16, 0);
+            bar.setCustomView(clock, new ActionBar.LayoutParams(ActionBar.LayoutParams.WRAP_CONTENT,
+                ActionBar.LayoutParams.WRAP_CONTENT, Gravity.RIGHT | Gravity.CENTER_VERTICAL));
+            bar.setDisplayShowCustomEnabled(true);
+        }
         Fonts.title(this, getTitle());
         Intent i = new Intent(this, StartService.class);
         i.putExtra("event", "manual");
@@ -137,12 +169,14 @@ public class MainActivity extends Activity {
         resumed = true;
         refresh();
         handler.postDelayed(refresher, 500);
+        ticker.run();
     }
 
     @Override
     protected void onPause() {
         resumed = false;
         handler.removeCallbacks(refresher);
+        handler.removeCallbacks(ticker);
         super.onPause();
     }
 

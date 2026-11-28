@@ -31,6 +31,18 @@ Warning: these are silly, but they can be disabled
 * The UI font is now Comic Relief (a very close clone of Comic Sans)
 * The accent color is now green instead of orange (yes I am considering vinyl wrapping the colored ring around the lens mount too)
 
+## Screenshots
+
+<p>
+<img src="menu.png" alt="The camera setting menu" width="49%"> <img src="app.png" alt="The app" width="49%">
+<img src="lcd.png" alt="LCD live view" width="49%"> <img src="evf.png" alt="EVF live view" width="49%">
+</p>
+
+1. The first page of the menu with patched font and color
+2. The app itself. Yes that's the Holo theme from Android 4.0
+3. The view on the LCD with the level and histogram tool
+4. The view on the EVF with all the settings and icons
+
 ## Configuration
 Create a file `A7HACKS.INI` (the filename has to be all caps!) with the following contents on the SD card root:
 ```

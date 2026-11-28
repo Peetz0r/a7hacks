@@ -2570,6 +2570,69 @@ static int lvtiming(const char *s) {
 #endif
 static const char built[] = "a7hacks helper built " A7_BUILT;
 
+/* --ram-watch path seconds start:len ...: which words of physical RAM change, and when (for the shutdown screen:
+ * av-cam's panel data around a switch-off). start and len in hex, words, at most 16 KB in all, RAM only; read
+ * every ~2 ms with plain reads of /dev/mem (opened read only). Words that change 3 times or more in the first
+ * 3 s are noisy and left out. As a time mark it also logs the display register 0xf3440770 (its 0x20000 bit goes
+ * off at a switch-off). One line per change: ms since start, the address, old > new. Read only. */
+#define RWMAX 4096
+static u32 rwv[RWMAX]; static u8 rwn[RWMAX];
+static int ramwatch(int argc, char **argv) {
+    u32 secs_ = 0, ra[16], rl[16], nr = 0, tot = 0;
+    if (!dec(argv[3], &secs_) || !secs_ || secs_ > 3600) { out("error usage"); return 1; }
+    for (int i = 4; i < argc && nr < 16; i++) {
+        u32 a = 0, l = 0; const char *p = argv[i];
+        for (; *p && *p != ':'; p++) { if (hexv(*p) < 0) { out("error usage"); return 1; } a = a << 4 | (u32)hexv(*p); }
+        if (*p++ != ':') { out("error usage"); return 1; }
+        for (; *p; p++) { if (hexv(*p) < 0) { out("error usage"); return 1; } l = l << 4 | (u32)hexv(*p); }
+        a &= ~3u; l = (l + 3) & ~3u;
+        if (!l || a - RAM_LO >= RAM_SIZE || RAM_SIZE - (a - RAM_LO) < l || tot + l / 4 > RWMAX) { out("error range"); return 1; }
+        ra[nr] = a; rl[nr] = l; nr++; tot += l / 4;
+    }
+    if (!nr) { out("error usage"); return 1; }
+    fd = sc(SYS_OPEN, (long)"/dev/mem", 0, 0, 0, 0);
+    if (fd < 0) { out("error open /dev/mem"); return 2; }
+    int rf = sc(SYS_OPEN, (long)"/dev/mem", 0x101000 /* O_RDONLY | O_SYNC */, 0, 0, 0);
+    long rm = rf < 0 ? -1 : sc6(SYS_MMAP2, 0, 0x1000, 1, 1, rf, (long)(0xf3440000u >> 12));
+    if (rf >= 0) sc(SYS_CLOSE, rf, 0, 0, 0, 0);
+    if ((unsigned long)rm >= 0xfffff000ul) { out("error mmap register"); return 2; }
+    const volatile u32 *mark = (const volatile u32 *)(rm + 0x770);
+    owlog = sc(SYS_OPEN, (long)argv[2], 01 | 0100 | 01000, 0644, 0, 0);
+    if (owlog < 0) { out("error open output"); return 2; }
+    static u8 buf[RWMAX * 4];
+    u32 k = 0;
+    for (u32 r = 0; r < nr; r++) { if (pread_(ra[r], buf, (int)rl[r]) < 0) { out("error read"); return 2; } for (u32 i = 0; i < rl[r] / 4; i++) { rwv[k] = rd32(buf + 4 * i); rwn[k++] = 0; } }
+    u32 t0 = msclock(1), lastmark = *mark, lines = 0, learned = 0;
+    owsay("# ram-watch: "); owsayn(nr); owsay(" ranges, "); owsayn(tot); owsay(" words; mark f3440770 = "); owsayx(lastmark); owsay("\n");
+    for (;;) {
+        u32 now = msclock(1), dt = now - t0;
+        if (dt > secs_ * 1000u || lines > 4000) break;
+        int learn = dt < 3000;
+        if (!learn && !learned) { learned = 1; u32 nn = 0; for (u32 i = 0; i < tot; i++) nn += rwn[i] >= 3; owsay("# "); owsayn(nn); owsay(" noisy words left out\n"); }
+        u32 m = *mark;
+        if (m != lastmark) { owsayn(dt); owsay(" mark f3440770 "); owsayx(lastmark); owsay(" > "); owsayx(m); owsay("\n"); lastmark = m; lines++; }
+        k = 0;
+        for (u32 r = 0; r < nr; r++) {
+            if (pread_(ra[r], buf, (int)rl[r]) < 0) { owsay("error read\n"); goto done; }
+            for (u32 i = 0; i < rl[r] / 4; i++, k++) {
+                u32 v = rd32(buf + 4 * i);
+                if (v == rwv[k]) continue;
+                if (learn) { if (rwn[k] < 255) rwn[k]++; }
+                else if (rwn[k] < 3) { owsayn(dt); owsay(" "); owsayx(ra[r] + 4 * i); owsay(" "); owsayx(rwv[k]); owsay(" > "); owsayx(v); owsay("\n"); lines++; }
+                rwv[k] = v;
+            }
+        }
+        long ts[2] = {0, 2000000};
+        sc(SYS_NANOSLEEP, (long)ts, 0, 0, 0, 0);
+    }
+done:
+    owsay("# end\n");
+    sc(SYS_CLOSE, owlog, 0, 0, 0, 0);
+    sc(SYS_MUNMAP, rm, 0x1000, 0, 0, 0);
+    out("logged "); outn(lines); out(" changes to "); out(argv[2]);
+    return 0;
+}
+
 /* --help (and the list of modes: the comment at the top points here) */
 static const char usage[] =
     "Usage (as root):\n"
@@ -2595,6 +2658,8 @@ static const char usage[] =
     "  liba7hacks.so --mem-find hex start len        where a byte string is in physical RAM (read only)\n"
     "  liba7hacks.so --off-watch path seconds        log what changes around a switch-off (read only)\n"
     "  liba7hacks.so --lv-timing ms                  when the live view buffers change and flip (read only)\n"
+    "  liba7hacks.so --ram-watch path secs start:len ...\n"
+    "                                                which words of physical RAM change, and when (read only)\n"
     "  liba7hacks.so --osd-mark shown|hidden secs    test: a magenta square in the shown/hidden OSD buffer\n"
     "  liba7hacks.so --ui-find hex                   where a byte string is in the UI's own data (read only)\n"
     "  liba7hacks.so --screenshot [osd.png lv.png] both.png\n"
@@ -2632,6 +2697,7 @@ static int run(int argc, char **argv) {
     if (argc == 4 && eq(o, "--reg-read")) return regread(argv[2], argv[3]);
     if (argc == 4 && eq(o, "--off-watch")) return offwatch(argv[2], argv[3]);
     if (argc == 3 && eq(o, "--lv-timing")) return lvtiming(argv[2]);
+    if (argc >= 5 && eq(o, "--ram-watch")) return ramwatch(argc, argv);
     if (argc == 4 && eq(o, "--osd-mark")) return osdmark(argv[2], argv[3]);
     if (argc == 3 && eq(o, "--ui-find")) return uifind(argv[2]);
     if (argc == 5 && eq(o, "--mem-find")) return memfind(argv[2], argv[3], argv[4]);

@@ -14,7 +14,8 @@ every command costs a mode change (each one sends the camera back through its US
                                  the same, plus the OSD and the live view each on its own (via the SD card: three
                                  PNGs don't fit in the camera's free RAM)
   camsh.py shot --android OUT.png
-                                 Android's own frame instead (screencap into RAM)
+                                 Android's own frame instead (screencap into RAM), in full colour: the panel (and
+                                 so shot without --android) gets it cut to 4 bits per channel (v >> 4, RGBA4444)
   camsh.py quit                  end the session properly (before an install, say)
 
 shot re-encodes the PNGs it copied (lossless; the camera writes them uncompressed): with optipng when that's

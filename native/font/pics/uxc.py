@@ -1,10 +1,12 @@
-import struct, numpy as np, sys
-sys.path.insert(0, '/tmp/claude-0/-home-claude/4ec12a3c-3e1f-5f1d-94ea-74196235f400/scratchpad/uxc')
+import os, struct, numpy as np, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lz import decode
 from tile import untile
-APP = '/home/claude/flash/out/nflasha15_unpacked_unpacked/share/app/'
+APP = os.environ.get('UXCAPP', '')   # the folder with the camera's image_*.uxc (its /usr/share/app; not included)
 def records(fn):
-    f = open(APP + fn, 'rb').read()
+    if not APP:
+        sys.exit('set UXCAPP to the folder with the camera\'s image_*.uxc (its /usr/share/app): see README')
+    f = open(os.path.join(APP, fn), 'rb').read()
     a = np.frombuffer(f[:len(f) // 4 * 4], dtype='<u4')
     idx = np.nonzero(((a[:-1] >> 24) == 0x1a) & (((a[1:] >> 24) == 0xe0) | ((a[1:] >> 24) == 0xe8)) & ((a[1:] & 0xffffff) == 0))[0]
     out = []

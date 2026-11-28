@@ -7,8 +7,9 @@ had, and records its length and a hash, which the camera checks before writing a
 import sys as _sys
 _HELP = """usage: python3 mkpics.py        (step 4 of 5, see README)
 Redraws the confirmed lettering in Comic Relief Bold and writes image_*.uxc.pics.json: per picture only the
-pixels we drew, the length and hash of the new picture as packed by ./uxclz, and a hash of the original.
-Reads scan2.pkl, cat.pkl and overrides.pkl; also writes texts.pkl. Env HUE, RED, BLUE: see hue.py.
+pixels we drew, the length and hash of the new picture as packed by uxclz, and a hash of the original.
+Reads scan2.pkl, cat.pkl and overrides.pkl and the camera's pictures ($UXCAPP: the folder with its
+image_*.uxc); also writes texts.pkl. Env UXCLZ (default: uxclz next to this script); HUE, RED, BLUE: see hue.py.
 
 This help text was written by an LLM"""
 if __name__ == '__main__' and _sys.argv[1:] in (['--help'], ['-h']):
@@ -21,7 +22,7 @@ import render, hue
 from ocr import finalize2, confirmed_lines
 from tile import tile
 FILES = ['image_cmn_43.uxc', 'image_EVF.uxc', 'image_DSLR_Only_43.uxc', 'image_DSC_Only_43.uxc']
-UXCLZ = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uxclz')
+UXCLZ = os.environ.get('UXCLZ', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uxclz'))
 def fnv(b):
     h = 0x811c9dc5
     for c in b: h = ((h ^ c) * 0x01000193) & 0xffffffff

@@ -59,7 +59,9 @@ Scripts
   python3 scan.py; python3 confirm.py; python3 overrides.py; python3 mkpics.py
   python3 mkpicheader.py ../../picpatch.h PC image_cmn_43.uxc.pics.json PE image_EVF.uxc.pics.json \
       PD image_DSLR_Only_43.uxc.pics.json PS image_DSC_Only_43.uxc.pics.json
-  (UXCAPP: the folder with the camera's image_*.uxc; UNIVERS: the camera's Univers as a .ttf)
+  (UXCAPP: the folder with the camera's image_*.uxc; UNIVERS: the camera's Univers as a .ttf; UXCLZ: the uxclz
+  built above, if it isn't next to these scripts. The scripts can be run from any folder: they read and write
+  their .pkl and .json files in the current one.)
 
 Left alone: lines where the readings disagree and nobody settled them, lettering cut out of a box (the shapes
 found aren't its letters), and lettering next to lettering that wasn't confirmed (half a label would be worse

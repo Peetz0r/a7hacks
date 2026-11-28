@@ -9,7 +9,8 @@ _HELP = """usage: python3 mkpicheader.py ../../picpatch.h  PC image_cmn_43.uxc.p
           PD image_DSLR_Only_43.uxc.pics.json  PS image_DSC_Only_43.uxc.pics.json   (step 5 of 5, see README)
 Writes the C header the font patcher uses for the pictures (picpatch.h): per picture where its data is, hashes of
 the old and new data, and our pixels only (packed with Sony's LZ77, shared between pictures that are the same).
-Needs uxclz ($UXCLZ, default ./uxclz: cc -O2 -DUXCLZ_MAIN -x c -o uxclz ../../uxclz.c).
+Reads the camera's pictures from $UXCAPP (the folder with its image_*.uxc). Needs uxclz ($UXCLZ, default: uxclz
+next to this script; cc -O2 -DUXCLZ_MAIN -x c -o uxclz ../../uxclz.c).
 
 This help text was written by an LLM"""
 if __name__ == '__main__' and _sys.argv[1:] in (['--help'], ['-h']):

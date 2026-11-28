@@ -2633,6 +2633,31 @@ done:
     return 0;
 }
 
+/* --arm7-sram path: the 16 KB SRAM of the SoC's small ARM7 core (physical 0x0-0x3fff, /proc/iomem "arm7sram") to
+ * path, read twice 100 ms apart through an uncached read-only mapping, in words; says how many words differ
+ * between the two reads (something running there changes some). Only this SRAM is read, not arm7io. */
+static int arm7sram(const char *path) {
+    static u32 a[0x1000], b2[0x1000];
+    int f = sc(SYS_OPEN, (long)"/dev/mem", 0x101000 /* O_RDONLY | O_SYNC */, 0, 0, 0);
+    if (f < 0) { out("error open /dev/mem"); return 2; }
+    long m = sc6(SYS_MMAP2, 0, 0x4000, 1 /* PROT_READ */, 1 /* MAP_SHARED */, f, 0);
+    sc(SYS_CLOSE, f, 0, 0, 0, 0);
+    if ((unsigned long)m >= 0xfffff000ul) { out("error mmap "); outn((u32)-m); return 2; }
+    const volatile u32 *r = (const volatile u32 *)m;
+    for (u32 i = 0; i < 0x1000; i++) a[i] = r[i];
+    long ts[2] = {0, 100000000};
+    sc(SYS_NANOSLEEP, (long)ts, 0, 0, 0, 0);
+    u32 diff = 0, zero = 0, ff = 0;
+    for (u32 i = 0; i < 0x1000; i++) { b2[i] = r[i]; if (b2[i] != a[i]) diff++; if (!a[i]) zero++; if (a[i] == 0xffffffffu) ff++; }
+    sc(SYS_MUNMAP, m, 0x4000, 0, 0, 0);
+    int o = sc(SYS_OPEN, (long)path, 01 | 0100 | 01000, 0644, 0, 0);
+    if (o < 0) { out("error open output"); return 2; }
+    sc(SYS_WRITE, o, (long)a, sizeof a, 0, 0);
+    sc(SYS_CLOSE, o, 0, 0, 0, 0);
+    out("written "); out(path); out(": "); outn(diff); out(" of 4096 words changed in 100 ms; "); outn(zero); out(" zero, "); outn(ff); out(" all ones");
+    return 0;
+}
+
 /* --help (and the list of modes: the comment at the top points here) */
 static const char usage[] =
     "Usage (as root):\n"
@@ -2660,6 +2685,7 @@ static const char usage[] =
     "  liba7hacks.so --lv-timing ms                  when the live view buffers change and flip (read only)\n"
     "  liba7hacks.so --ram-watch path secs start:len ...\n"
     "                                                which words of physical RAM change, and when (read only)\n"
+    "  liba7hacks.so --arm7-sram path                the ARM7 core's 16 KB SRAM to path (read only)\n"
     "  liba7hacks.so --osd-mark shown|hidden secs    test: a magenta square in the shown/hidden OSD buffer\n"
     "  liba7hacks.so --ui-find hex                   where a byte string is in the UI's own data (read only)\n"
     "  liba7hacks.so --screenshot [osd.png lv.png] both.png\n"
@@ -2698,6 +2724,7 @@ static int run(int argc, char **argv) {
     if (argc == 4 && eq(o, "--off-watch")) return offwatch(argv[2], argv[3]);
     if (argc == 3 && eq(o, "--lv-timing")) return lvtiming(argv[2]);
     if (argc >= 5 && eq(o, "--ram-watch")) return ramwatch(argc, argv);
+    if (argc == 3 && eq(o, "--arm7-sram")) return arm7sram(argv[2]);
     if (argc == 4 && eq(o, "--osd-mark")) return osdmark(argv[2], argv[3]);
     if (argc == 3 && eq(o, "--ui-find")) return uifind(argv[2]);
     if (argc == 5 && eq(o, "--mem-find")) return memfind(argv[2], argv[3], argv[4]);

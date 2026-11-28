@@ -171,6 +171,10 @@ for h, s_ in sl.items():
     if (byh[h]['fn'], byh[h]['res']) in DIMMED: out[h] = [dict(exclusive=True, settled='leave')]; continue
     L = badges.lines_for(byh[h]['pic'], s_['lines'])
     if L: out[h] = L; stats['badge'] += 1
+# Sony's warning sign (a box with a '!' cut out), wherever it is (badges.warn_lines)
+for h, r in byh.items():
+    L = badges.warn_lines(r['pic'], out.get(h, []))
+    if L: out[h] = out.get(h, []) + L; stats['warning sign'] += len(L)
 # pictures that take each other's place on screen: the same lettering, in the same place (the USB icon with the
 # circular arrows turns into the one with the lines beside it; Sony's "USB" doesn't move, so ours mustn't either)
 import copy

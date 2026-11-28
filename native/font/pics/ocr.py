@@ -3,8 +3,11 @@ from scipy import ndimage
 from PIL import Image, ImageDraw, ImageFont
 UNIV = __import__('os').environ.get('UNIVERS', 'univers.ttf')   # the camera's Univers, from UniversOTS-SJ_wIcon.ltt (see ../build.py)
 CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz+-/%'
-FONTS = [UNIV, '/usr/share/fonts/truetype/liberation/LiberationSansNarrow-Bold.ttf',
-         '/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf']
+def sysfont(name):
+    """a font of the system's by its file name, wherever the distribution keeps it (Debian, Fedora, ...)"""
+    import glob
+    return (glob.glob('/usr/share/fonts/**/' + name, recursive=True) or [name])[0]
+FONTS = [UNIV, sysfont('LiberationSansNarrow-Bold.ttf'), sysfont('DejaVuSansCondensed-Bold.ttf')]
 _tpl = {}; _src = {}
 def tpl(c, h, w, fi=0):
     """character c rendered in font fi, cropped to its ink and stretched to w x h (float 0..1)"""

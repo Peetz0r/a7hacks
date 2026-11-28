@@ -29,7 +29,10 @@ Scripts
   render.py   erases a line (its fill, edge and shadow) and draws it in Comic Relief Bold over the same place:
               same height (caps / x-height per run of characters), natural width where there is room around
               it, squeezed (to 0.62 at most, then smaller) where there isn't; the same fill grey, dark edge and
-              soft shadow as the original, measured from it
+              soft shadow as the original, measured from it. Sony's warning sign (a box with a '!' cut out:
+              !Lens, !RAW, beside icons, in the SteadyShot focal lengths' shake warning, ...; found by its
+              shape, badges.warn_lines) becomes a rounded box of the same size with Comic Relief's '!' cut out
+              (stem and dot set apart), with the line's edge and shadow inside the cut-out
   mkpics.py   builds image_*.uxc.pics.json: per picture, only the pixels we drew (in the camera's order),
               the length and hash of the new picture packed by ../../uxclz.c (quick mode where it fits,
               else medium (a longer search), else the cheapest), and a hash of the original; Sony's own pixels are not in it

@@ -8,7 +8,8 @@ from ocr import components, tpl, FONTS
 from PIL import ImageFont
 DOTTED = {'Std', 'Port', 'Land'}      # these end in a full stop
 STYLES = ['Std', 'Vivid', 'Ntrl', 'Clear', 'Deep', 'Light', 'Port', 'Land', 'Sunset', 'Night', 'Autm', 'B/W', 'Sepia']
-_f = ImageFont.truetype('/usr/share/fonts/truetype/google-fonts/ofl/comicrelief/ComicRelief-Bold.ttf', 100)
+from render import COMIC
+_f = ImageFont.truetype(COMIC, 100)
 
 def style_of(lines):
     """(word, scanned line) if a scanned line reads as one of the style words"""
@@ -219,3 +220,33 @@ def hi_line(p, scanned):
         boxes = [(h['x0'], h['y0'], h['x1'], h['y1'], 'H', 1.0), (j['x0'], j['y0'], j['x1'], j['y1'], 'I', 1.0)]
         return dict(l, boxes=boxes, text='HI', settled='word', orig=l['text'], free=True)
     return None
+
+def warn_boxes(p):
+    """Sony's warning signs in a picture: light boxes, about square, with a '!' cut out (two holes in the
+    middle, the stem's above the dot's): their (x0, y0, x1, y1)"""
+    out = []
+    for c in components(p, True):
+        h, w = c['y1'] - c['y0'], c['x1'] - c['x0']
+        if h < 8 or not 0.85 <= w / h <= 1.25: continue
+        f = ndimage.binary_fill_holes(c['mask'])
+        if f.mean() < 0.85: continue                   # a box (rounded corners), not a letter with holes
+        hl, n = ndimage.label(f & ~c['mask'])
+        if n != 2: continue
+        st, dt = sorted(ndimage.find_objects(hl), key=lambda s: s[0].start)
+        if dt[0].start < st[0].stop or st[0].stop - st[0].start < 1.5 * (dt[0].stop - dt[0].start): continue
+        if any(abs((s[1].start + s[1].stop) / 2 - w / 2) > 0.15 * w for s in (st, dt)): continue
+        out.append((c['x0'], c['y0'], c['x1'], c['y1']))
+    return out
+
+def warn_lines(p, settled):
+    """a '!' line of its own for each warning sign not already in a settled line (also beside an icon, where
+    no lettering was read), staying where it is: render.py draws it as a rounded box with Comic Relief's '!'
+    cut out"""
+    out = []
+    ex = any(l.get('exclusive') for l in settled)
+    if ex and not any(l.get('boxes') for l in settled): return out          # a picture left alone on purpose
+    for x0, y0, x1, y1 in warn_boxes(p):
+        if any(b[4] == '!' and abs(b[0] - x0) <= 2 and abs(b[1] - y0) <= 2 for l in settled for b in l.get('boxes', ())): continue
+        out.append(dict(text='!', score=1.0, light=True, H=y1 - y0, boxes=[(x0, y0, x1, y1, '!', 1.0)], tess='!',
+                        sim=1.0, settled='known', orig='', free=True, span=(x0, x1), exclusive=ex))
+    return out

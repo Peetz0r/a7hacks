@@ -2,7 +2,9 @@ import numpy as np
 from scipy import ndimage
 from PIL import Image, ImageDraw, ImageFont
 from ocr import split, components
-COMIC = '/usr/share/fonts/truetype/google-fonts/ofl/comicrelief/ComicRelief-Bold.ttf'
+import os
+# the app's own copy of the font
+COMIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../../app/src/main/assets/fonts/ComicRelief-Bold.ttf')
 SS = 4
 SHADOW = True; LEVELS = 16       # style knobs: soft outer shadow; grey/alpha steps used in redrawn areas
 XH = set('acemnorsuvwxz'); DESC = set('gjpqy'); SMALL = set('+-/%.\u00b1')
@@ -43,11 +45,53 @@ def runs(chars):
             out[-1][1].append(c)
         else: out.append([k, [c]])
     return out
+BOX_RADIUS = 0.2; BOX_BANG = 0.75   # the warning box: corner radius and the cut-out '!', as parts of its height
+BOX_CUT = 2                         # the cut-out is the '!' this many pixels wider all round (the line's edge and
+                                    # shadow fill that ring; Comic Relief's '!' itself stays clear, like Sony's)
+BOX_BAR = 3                         # pixels of box left between the stem's and the dot's cut-outs
+BOX_FOR = 42                        # ... both for a box this high, and in proportion for others (but at least
+                                    # 3 pixels between the cut-outs: the edge goes into both)
+def isbox(c):
+    """Sony's warning sign, a light box with a '!' cut out of it: read as '!', but as wide as it is high"""
+    return c[4] == '!' and c[2] - c[0] >= 0.6 * (c[3] - c[1])
+def warnbox(w, h):
+    """the warning box at SS (w x h pixels): a rounded box with Comic Relief's '!' cut out of it (the cut-out
+    gets the line's edge and shadow inside, like Sony's)"""
+    im = Image.new('L', (w, h), 0)
+    ImageDraw.Draw(im).rounded_rectangle((0, 0, w - 1, h - 1), radius=BOX_RADIUS * h, fill=255)
+    a = np.array(im, float) / 255
+    # Comic's '!' as stem and dot, set further apart (its own gap is far too narrow to keep a ring round each)
+    b, _ = ink('!', 1000); rows = (b > 0.5).any(axis=1)
+    t = int(np.argmax(rows)); s = t + int(np.argmin(rows[t:])); d = s + int(np.argmax(rows[s:]))   # stem ends, dot starts
+    f = h / SS / BOX_FOR; r = round(BOX_CUT * f * SS)
+    gap = max(2 * r + round(BOX_BAR * f * SS), 3 * SS)       # the edge and shadow go into both cut-outs
+    k = (BOX_BANG * h - 2 * r - gap) / (s + b.shape[0] - d)
+    def scaled(x): return np.array(Image.fromarray((x * 255).astype(np.uint8)).resize((max(1, round(x.shape[1] * k)), max(1, round(x.shape[0] * k))), Image.LANCZOS), float) / 255
+    stem, dot = scaled(b[:s]), scaled(b[d:])
+    b = np.zeros((stem.shape[0] + gap + dot.shape[0], stem.shape[1]))
+    b[:stem.shape[0]] = stem; b[-dot.shape[0]:, :dot.shape[1]] = dot
+    b = np.pad(b, r); yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
+    b = ndimage.grey_dilation(b, footprint=yy * yy + xx * xx <= r * r)
+    y, x = (h - b.shape[0]) // 2, (w - b.shape[1]) // 2
+    a[y:y + b.shape[0], x:x + b.shape[1]] -= b
+    return np.clip(a, 0, 1)
 def coverage(shape, chars, free, squeeze_min=0.62):
     """Comic coverage (1x, 0..1) for a line of chars; free: (xa, xb) columns it may use"""
     H, W = shape
     parts = []                                             # (ink array at SS, baseline in ink, orig x0, x1, base)
+    groups = []                                            # each warning box on its own, the rest in runs
     for kind, rc in runs(chars):
+        cur = []
+        for c in rc:
+            if isbox(c):
+                if cur: groups.append((kind, cur)); cur = []
+                groups.append(('box', [c]))
+            else: cur.append(c)
+        if cur: groups.append((kind, cur))
+    for kind, rc in groups:
+        if kind == 'box':                                  # its own size, never squeezed or made smaller
+            c = rc[0]; a = warnbox((c[2] - c[0]) * SS, (c[3] - c[1]) * SS)
+            parts.append([a, a.shape[0], c[0], c[2], c[3], None, None]); continue
         text = ''.join(c[4] for c in rc)
         nd = [c for c in rc if c[4] not in DESC and c[4] not in SMALL] or rc
         hs = sorted(c[3] - c[1] for c in nd)
@@ -60,19 +104,22 @@ def coverage(shape, chars, free, squeeze_min=0.62):
     def natural(): return sum(p[0].shape[1] for p in parts) + sum(gaps)
     x0 = parts[0][2]; x1 = parts[-1][3]
     avail = (free[1] - free[0]) * SS
-    sq = min(1.0, avail / natural())
+    fixed = sum(p[0].shape[1] for p in parts if p[6] is None)          # warning boxes
+    def squeeze(): return min(1.0, max(1e-3, avail - fixed) / max(1e-3, natural() - fixed))
+    sq = squeeze()
     if sq < squeeze_min:                                   # even squeezed it won't fit: smaller too
         f = sq / squeeze_min
         for p in parts:
+            if p[6] is None: continue
             p[5] = max(6, int(p[5] * f)); p[0], p[1] = ink(p[6], p[5])
-        gaps = [g * f for g in gaps]; sq = min(1.0, avail / natural())
-    total = natural() * sq
+        gaps = [g * f for g in gaps]; sq = squeeze()
+    total = (natural() - fixed) * sq + fixed
     cx = (x0 + x1) / 2 * SS
     X = cx - total / 2
     X = min(max(X, free[0] * SS), free[1] * SS - total)
     cov = np.zeros((H * SS, W * SS))
-    for i, (a, bl, _, _, base, _, _) in enumerate(parts):
-        w = max(1, int(round(a.shape[1] * sq)))
+    for i, (a, bl, _, _, base, _, text) in enumerate(parts):
+        w = a.shape[1] if text is None else max(1, int(round(a.shape[1] * sq)))
         a = np.array(Image.fromarray((a * 255).astype(np.uint8)).resize((w, a.shape[0]), Image.LANCZOS), float) / 255
         Xi = int(round(X)); Y = int(round(base * SS - bl))
         ys, xs = slice(max(0, Y), min(H * SS, Y + a.shape[0])), slice(max(0, Xi), min(W * SS, Xi + w))

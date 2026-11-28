@@ -57,7 +57,9 @@
  * [tK | nolabels] [pP[/T] | nopics] [aA] [noicons] | partial N/M [pP/T] | off [pics] | badfile | error ...; M = cached
  * characters marked; P/T: pictures done of how many, while they are still being done; hH: the time in 24 hours
  * (pics.c, clock24) in H places; iI: live view shows the focal length I instead of F--; kYYCBCR: focus peaking's
- * "Custom" colour (Sony's Yellow) is ours, in Y, Cb, Cr (from /android/dev/a7hacks.pk); fF, sS: seconds from the
+ * "Custom" colour (Sony's Yellow) is ours, in Y, Cb, Cr (from /android/dev/a7hacks.pk); z+M / z-M: files on an
+ * exFAT card get M minutes east of UTC as their offset (pics.c, TZC; M from udate: time zone plus summer time,
+ * so it follows a summer time switch within ~10 s); fF, sS: seconds from the
  * patcher's start until the font, and the pictures, were all in) goes to
  * /android/dev/a7hacks.ft. A stop (SIGTERM, the app's Restart) is held off while
  * the patcher writes, so nothing is left half written.
@@ -1919,6 +1921,7 @@ static void ftreport(char *st, char *last, int left, int done, int total, int ca
         if (pics && h24n > 0) { k = scat(st, k, " h"); k = scatn(st, k, (u32)h24n); }
         if (pics && irisin > 0) { k = scat(st, k, " i"); k = scatn(st, k, irisin); }
         if (!pics && icons) k = scat(st, k, " nopics");
+        if (pics && tzinon) { k = scat(st, k, tzin < 0 ? " z-" : " z+"); k = scatn(st, k, (u32)(tzin < 0 ? -tzin : tzin)); }
         if (pics && pkin) { k = scat(st, k, " k"); char x[7]; for (int i = 0; i < 6; i++) x[i] = "0123456789abcdef"[(pkin >> (20 - 4 * i)) & 15]; x[6] = 0; k = scat(st, k, x); }
         if (pics && texd >= 0) { k = scat(st, k, " g"); k = scatn(st, k, (u32)(texd + (texe > 0 ? texe : 0))); }
         if (noicons && icons) k = scat(st, k, " noicons");
@@ -1930,6 +1933,15 @@ static void ftreport(char *st, char *last, int left, int done, int total, int ca
     if (changed) { ftstatus(st); for (int i = 0; i <= k; i++) last[i] = st[i]; }
 }
 
+static int udread(long *t, int *off);
+/* the offset word for the files' times (pics.c, tzw): the camera's minutes east of UTC from udate, when it
+ * knows them (its time is set), else none (Sony's "not valid" stays) */
+static void tzupdate(void) {
+    long t; int off;
+    tzon = udread(&t, &off) == 1;
+    if (!tzon) return;
+    tzw[0] = 1; tzw[1] = 0; tzw[2] = (u8)off; tzw[3] = (u8)((u32)off >> 8);
+}
 static int font(int on, int icons) {
     if (!on) {
         ftstatus("restoring");
@@ -1995,6 +2007,7 @@ static int font(int on, int icons) {
         int acc = pics ? colours(1) : 0;      /* the text accent colour too */
         irisfl = pics && mountok ? manualfl() : 0;   /* a lens that tells no aperture: its focal length for F-- */
         if (pics) pkupdate();                 /* the peaking colour for Custom (and Sony's copies of it) */
+        if (pics) tzupdate();                 /* the offset from UTC for the files' times */
         h24n = pics ? clock24(1) : 0;         /* and the time in 24 hours */
         int pleft = 0;
         if (pics && pics_state != 2) {         /* a batch at a time; once all are in, the label store's copies go */

@@ -309,6 +309,9 @@ static int colours(int on) {
  *    and 0x26148;
  *  - ACT_IconLabelPbDatacode in viewUnified2.so (a time with seconds): a table in the read-only data, one byte
  *    per date format, 1 = 24 hours (Sony's 0, 0, 0, 1): Y-M-D's becomes 1.
+ * Not the time's look but the files' times (kind TZC, TZL; see tzw below): on an exFAT card every file's times
+ * get the camera's offset from UTC (exFAT keeps one per time stamp; Sony's always says "unknown", which
+ * Linux takes as UTC, so photos look an hour or two late on a PC).
  * Into the camera's in-memory copy of each library, like the colours (its page kept there while the font
  * patcher runs), only if the whole page is exactly the one we know (its hash with Sony's bytes in our places)
  * and each place holds Sony's bytes or ours. Written a byte at a time, in order (backwards when putting Sony's
@@ -326,6 +329,7 @@ static struct h24f { const char *path; u32 size, page, hash; const u8 *map; } h2
     {PICDIR "viewStlrec.uxc", 19504u, 0x3000u, 0xaf949fccu, 0},
     {"/usr/lib/viewUnified2.so", 5317568u, 0x11f000u, 0x5a8e6b1eu, 0},
     {"/usr/lib/libObj.so", 16454084u, 0x3e9000u, 0xdd39ba51u, 0},
+    {"/usr/lib/libInfraFsys.so", 374316u, 0x26000u, 0x92fb909au, 0},
 };
 /* kind: H24 the time in 24 hours (always); IRIS_T, IRIS_W the focal length where live view says F-- (only with a
  * lens that tells no aperture: see irisfl below), IRIS_W a code word written at once; IRIS_S always Sony's (it was
@@ -337,6 +341,8 @@ static struct h24f { const char *path; u32 size, page, hash; const u8 *map; } h2
 #define LAY 4
 #define PKC 5
 #define PKL 6
+#define TZC 7
+#define TZL 8
 static const struct h24p { int f; u32 off; u8 n, kind, old[4], nw[4]; } h24ps[] = {
     {0, 0x26142u, 2, H24, {0x03, 0x2d}, {0x03, 0x25}},     /* cmp r5, #3  ->  movs r5, #3 */
     {0, 0x26148u, 2, H24, {0x2d, 0xd0}, {0x2d, 0xe0}},     /* beq (24 hours)  ->  b */
@@ -399,15 +405,31 @@ static const struct h24p { int f; u32 off; u8 n, kind, old[4], nw[4]; } h24ps[] 
     {9, 0x3e96e0u, 2, PKC, {0x00, 0x20}, {0x0a, 0xe0}},     /*   b 0x3e96f8 (Sony's stores of Y, Cb, Cr) */
     {9, 0x3e9748u, 4, PKL, {0x68, 0x03, 0x07, 0x01}, {0}},  /* Yellow's backup id 0x01070368  ->  the colour */
     {9, 0x3e96c8u, 2, PKC, {0x0d, 0xd0}, {0x07, 0xd0}},     /* cmp r5, #2: beq 0x3e96e6 (Bkup_Read)  ->  beq 0x3e96da */
+    /* The files' offset from UTC. PrFILE2 (the camera's file system, libInfraFsys.so) asks Sony's
+     * fsysDepMCmn_CreateTimeStamp (0x25fd8) for the time of every change: it gives the date and time and
+     * zeros for the 10 ms, "offset valid" and offset fields (+6, +8, +0xa of the time it fills), and
+     * PFENT_EXFAT_CalcUtcOffset makes those "not valid" in the exFAT entry. Ours: its last stores take the
+     * offset word (TZL, tzw: 1 in the low half for "valid", the minutes east of UTC in the high half) and
+     * store it as both fields at once; the room for the word comes from the clamp of years after 2107, which
+     * goes (such a year would wrap to 1980 on: month, day and time stay right; Sony's menu stops at 2037).
+     * A word at a time, in order: each step leaves code that writes sensible times (Sony's zeros until the
+     * last step), and Sony's back the other way round. */
+    {10, 0x26044u, 4, TZC, {0x23, 0x80, 0xdd, 0xd9}, {0x23, 0x80, 0xdd, 0xe7}},  /* bls 0x26004  ->  b 0x26004 */
+    {10, 0x2604cu, 4, TZL, {0x83, 0x42, 0x88, 0xbf}, {0}},  /* the year clamp's cmp, it  ->  the offset word */
+    {10, 0x26040u, 4, TZC, {0x68, 0x81, 0x98, 0xbf}, {0xa8, 0x60, 0x98, 0xbf}},  /* strh r0, [r5, #0xa]  ->  str r0, [r5, #8] */
+    {10, 0x2603cu, 4, TZC, {0xe8, 0x80, 0x28, 0x81}, {0xe8, 0x80, 0x03, 0x48}},  /* strh r0, [r5, #8]  ->  ldr r0, =word */
 };
 #define NH24F ((int)(sizeof h24fs / sizeof h24fs[0]))
 #define NH24P ((int)(sizeof h24ps / sizeof h24ps[0]))
 /* the peaking colour asked for, as the literal's bytes (Cr, Cb, Y, 0); pkon: one is asked for (a7hacks.pk) */
 static u8 pkw[4]; static int pkon;
+/* the offset word as its bytes (1, 0, minutes low, high); tzon: the camera knows its offset (udate) */
+static u8 tzw[4]; static int tzon;
 /* is q (n bytes) ours for place P: its new bytes, for PKL any colour word (top byte 0: Sony's is a backup id,
- * 0x01......), or for IRIS_S 1..4 digits padded with NULs */
+ * 0x01......), for TZL any offset word (low half 1), or for IRIS_S 1..4 digits padded with NULs */
 static int h24ours(const struct h24p *P, const u8 *q) {
     if (P->kind == PKL) return q[3] == 0;
+    if (P->kind == TZL) return q[0] == 1 && q[1] == 0;
     if (P->kind != IRIS_S) { for (int j = 0; j < P->n; j++) if (q[j] != P->nw[j]) return 0; return 1; }
     int d = 0; while (d < P->n && q[d] >= '0' && q[d] <= '9') d++;
     if (!d) return 0;
@@ -425,6 +447,7 @@ static int h24ours(const struct h24p *P, const u8 *q) {
  * decides ours or Sony's now), 0 for Sony's. */
 static u32 irisfl, irisin;              /* irisin: the focal length the label has been given (status iN) */
 static u32 pkin;                        /* 0x1YYCBCR: the peaking colour that is in (status k), 0: Sony's */
+static int tzin, tzinon;                /* the offset the files get (status z), tzinon: ours is in */
 static int clock24(int on) {
     static u8 b[4096];
     int ok[NH24F];
@@ -465,17 +488,19 @@ static int clock24(int on) {
             const struct h24p *P = &h24ps[k];
             struct h24f *F = &h24fs[P->f];
             int mine = (P->kind == H24 || P->kind == LAY) ? on : P->kind == IRIS_S ? 0
-                     : (P->kind == PKC || P->kind == PKL) ? (on && pkon) : (on && irisfl > 0 && irisfl < 10000);
+                     : (P->kind == PKC || P->kind == PKL) ? (on && pkon)
+                     : (P->kind == TZC || P->kind == TZL) ? (on && tzon) : (on && irisfl > 0 && irisfl < 10000);
             if (mine != pass) continue;
             if (!ok[P->f]) { bad = -2; continue; }        /* not the library we know: leave it */
-            const u8 *want = !mine ? P->old : P->kind == PKL ? pkw : P->nw;
+            const u8 *want = !mine ? P->old : P->kind == PKL ? pkw : P->kind == TZL ? tzw : P->nw;
             u8 *q = (u8 *)F->map + (P->off - F->page);
             int same = 1;
             for (int j = 0; j < P->n; j++) if (q[j] != want[j]) same = 0;
             if (!same) {
                 int r = 1;
                 hold(1);
-                if (P->kind == IRIS_W || P->kind == PKL) r = vrw(mypid, (u32)(unsigned long)q, (u8 *)want, P->n, 1);   /* one aligned word */
+                if (P->kind == IRIS_W || P->kind == PKL || P->kind == TZC || P->kind == TZL)
+                    r = vrw(mypid, (u32)(unsigned long)q, (u8 *)want, P->n, 1);   /* one aligned word */
                 else for (int j = 0; j < P->n && r > 0; j++) {  /* a byte at a time: low first, Sony's back high first */
                     int bb = mine ? j : P->n - 1 - j;
                     if (q[bb] != want[bb]) r = vrw(mypid, (u32)(unsigned long)(q + bb), (u8 *)want + bb, 1, 1);
@@ -498,6 +523,12 @@ static int clock24(int on) {
           if (P->kind != PKC && P->kind != PKL) continue;
           all++; if (h24fs[P->f].map && h24ours(P, h24fs[P->f].map + (P->off - h24fs[P->f].page))) t++; }
       if (t == all && on && pkon) pkin = 0x1000000u | (u32)pkw[2] << 16 | (u32)pkw[1] << 8 | pkw[0]; }
+    tzinon = 0;                                  /* every offset place ours: the offset the files get (status z) */
+    { int t = 0, all = 0; const u8 *w = 0; for (int k = 0; k < NH24P; k++) { const struct h24p *P = &h24ps[k];
+          if (P->kind != TZC && P->kind != TZL) continue;
+          const u8 *q = h24fs[P->f].map ? h24fs[P->f].map + (P->off - h24fs[P->f].page) : 0;
+          all++; if (q && h24ours(P, q)) { t++; if (P->kind == TZL) w = q; } }
+      if (t == all && on && tzon && w) { tzinon = 1; tzin = (short)(w[2] | w[3] << 8); } }
     if (!on) for (int f = 0; f < NH24F; f++) if (h24fs[f].map) { sc(SYS_MUNMAP, (long)h24fs[f].map, 4096, 0, 0, 0); h24fs[f].map = 0; }
     return n ? n : bad;
 }

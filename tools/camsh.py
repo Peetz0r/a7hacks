@@ -21,9 +21,9 @@ every command costs a mode change (each one sends the camera back through its US
 shot re-encodes the PNGs it copied (lossless; the camera writes them uncompressed): with optipng when that's
 installed, else with Python's zlib.
 
-The terminal is switched on once and left on; files are read while it is on. serve uses pmca (Sony-PMCA-RE in
-~/Sony-PMCA-RE) as a library, since its own terminal only ends on a real Ctrl+C: run it with the Python that has
-pmca's dependencies (its venv, say). The other commands only need Python. The socket is in $XDG_RUNTIME_DIR.
+The terminal is switched on once and left on; files are read while it is on. serve uses pmca (Sony-PMCA-RE: the
+folder in $PMCA_RE, else Sony-PMCA-RE next to this repo, else ~/Sony-PMCA-RE) as a library, since its own
+terminal only ends on a real Ctrl+C: run it with the Python that has pmca's dependencies (its venv, say). The other commands only need Python. The socket is in $XDG_RUNTIME_DIR.
 
   camsh.py --help                this text
 
@@ -31,6 +31,15 @@ This help text was written by an LLM"""
 import json, os, re, shutil, socket, struct, subprocess, sys, time, zlib
 
 SOCK = os.path.join(os.environ.get('XDG_RUNTIME_DIR') or '/tmp', 'camsh.sock')
+
+
+def pmca_path():
+    """Sony-PMCA-RE's folder: $PMCA_RE, else next to this repo, else in the home folder."""
+    here = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    for p in (os.environ.get('PMCA_RE'), os.path.join(here, 'Sony-PMCA-RE'), os.path.expanduser('~/Sony-PMCA-RE')):
+        if p and os.path.isdir(os.path.join(p, 'pmca')):
+            return p
+    raise SystemExit('Sony-PMCA-RE not found: set PMCA_RE to its folder')
 SHOT_REMOTE = '/android/dev/a7shot.png'      # /android/dev is tmpfs: RAM
 SHOT = ('chroot /android /system/bin/sh -c "ANDROID_ROOT=/system ANDROID_DATA=/data '
         'LD_LIBRARY_PATH=/system/lib /system/bin/screencap -p /dev/a7shot.png"')
@@ -85,7 +94,7 @@ def ush(b, cmd, timeout=60):
 
 
 def serve_updater():
-    sys.path.insert(0, os.path.expanduser('~/Sony-PMCA-RE'))
+    sys.path.insert(0, pmca_path())
     from pmca.commands.usb import updaterShellCommand
     from pmca.platform.backend.usb import UsbPlatformBackend
 
@@ -131,7 +140,7 @@ def serve_updater():
 
 
 def serve():
-    sys.path.insert(0, os.path.expanduser('~/Sony-PMCA-RE'))
+    sys.path.insert(0, pmca_path())
     from pmca.commands.usb import senserShellCommand
     from pmca.platform.backend.senser import SenserPlatformBackend
 

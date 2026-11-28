@@ -146,9 +146,26 @@ static int lz_encode(const unsigned char *s, int n, unsigned char *dst, int how)
 #ifdef UXCLZ_MAIN
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 /* uxclz e|q|m|d < in > out  (pack the cheapest way, the quick way, the medium way; unpack) */
+static const char uxclz_help[] =
+    "usage: uxclz e|q|m|d < in > out\n"
+    "Sony's LZ77 as in the camera's image_*.uxc pictures (and its firmware), the same code the helper uses:\n"
+    "  e  pack, the cheapest way (smallest output, slow)\n"
+    "  q  pack, the quick way (greedy)\n"
+    "  m  pack, the medium way (a longer search than q)\n"
+    "  d  unpack\n"
+    "Reads stdin (at most 4 MB), writes stdout; exit status 1 if the data doesn't unpack or doesn't fit.\n"
+    "Build: cc -O2 -DUXCLZ_MAIN -x c -o uxclz native/uxclz.c (font/pics/mkpics.py and mkpicheader.py run it).\n"
+    "\n"
+    "This help text was written by an LLM\n";
 int main(int argc, char **argv) {
     static unsigned char in[1 << 22], out[1 << 23];
+    if (argc == 2 && (!strcmp(argv[1], "--help") || !strcmp(argv[1], "-h"))) { fputs(uxclz_help, stdout); return 0; }
+    if (argc != 2 || !argv[1][0] || argv[1][1] || !strchr("eqmd", argv[1][0])) {
+        fputs("usage: uxclz e|q|m|d < in > out (see --help)\n", stderr);
+        return 2;
+    }
     int n = (int)fread(in, 1, sizeof in, stdin);
     int m = argv[1][0] == 'd' ? lz_decode(in, n, out, sizeof out) : lz_encode(in, n, out, argv[1][0] == 'q' ? LZ_QUICK : argv[1][0] == 'm' ? LZ_MEDIUM : LZ_CHEAPEST);
     if (m < 0) return 1;

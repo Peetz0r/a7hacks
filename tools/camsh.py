@@ -23,7 +23,11 @@ installed, else with Python's zlib.
 
 The terminal is switched on once and left on; files are read while it is on. serve uses pmca (Sony-PMCA-RE in
 ~/Sony-PMCA-RE) as a library, since its own terminal only ends on a real Ctrl+C: run it with the Python that has
-pmca's dependencies (its venv, say). The other commands only need Python. The socket is in $XDG_RUNTIME_DIR."""
+pmca's dependencies (its venv, say). The other commands only need Python. The socket is in $XDG_RUNTIME_DIR.
+
+  camsh.py --help                this text
+
+This help text was written by an LLM"""
 import json, os, re, shutil, socket, struct, subprocess, sys, time, zlib
 
 SOCK = os.path.join(os.environ.get('XDG_RUNTIME_DIR') or '/tmp', 'camsh.sock')
@@ -289,6 +293,9 @@ def client(args):
 
 if __name__ == '__main__':
     a = sys.argv[1:]
+    if a in (['--help'], ['-h']):
+        print(__doc__)
+        sys.exit(0)
     usage = {'serve': 0, 'sh': 1, 'pull': 2, 'push': 2, 'shot': 1, 'quit': 0}
     shot = a[:1] == ['shot'] and (len(a) in (2, 4) and '--android' not in a or len(a) == 3 and a[1] == '--android')
     if not a or a[0] not in usage or (len(a) != usage[a[0]] + 1 and a != ['serve', '--updater'] and not shot) \

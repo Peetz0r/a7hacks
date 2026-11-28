@@ -1,39 +1,7 @@
 /* a7hacks - the root side of Peetz0r's α7-hacks (ILCE-7M2 firmware 4.01 only). Shipped in the app as its "native
  * library" liba7hacks.so, so that Android installs it executable; the app runs it as root.
  *
- * Usage (as root):
- *   liba7hacks.so --lens-write id 0               manual lens EXIF info off (the camera behaves as without us)
- *   liba7hacks.so --lens-write id 1 fnum fden anum aden mnum mden [namehex]
- *       focal length fnum/fden, F-number anum/aden, widest aperture as an APEX value (2 log2 N, EXIF
- *       MaxApertureValue: the camera copies it as it is) mnum/mden,
- *       lens name as hex bytes (at most 64). Numbers are decimal.
- *   liba7hacks.so --lens-read id                  show the block
- *   liba7hacks.so --exposure-patcher              run forever: exposure focal length (see below)
- *   liba7hacks.so --label-patcher                 run forever: menu label (see below)
- *   liba7hacks.so --label-find [--all]            menu label, read only: show where the label is
- *   liba7hacks.so --font-patcher [--text-only]    run forever: UI font, icon and picture lettering, accent colour
- *                                                 (--text-only: the UI font only)
- *   liba7hacks.so --font-restore                  UI font: put the camera's own back
- *   liba7hacks.so --set-clock                     Linux's clock: set it from the camera's own (see below)
- *   liba7hacks.so --version                       when this helper was built (UTC)
- *   liba7hacks.so --memory-dump path [--all]      copy the UI's own data to path (for study elsewhere;
- *                                                 --all: and the driver memory it has mapped, RAM pages only)
- *   liba7hacks.so --memory-changes start len [ms]  which 64 KB blocks of physical memory change (read only)
- *   liba7hacks.so --reg-read addr n               n 32-bit hardware registers from addr on (read only)
- *   liba7hacks.so --mem-find hex start len        where a byte string is in physical RAM (read only)
- *   liba7hacks.so --off-watch path seconds        log what changes around a switch-off (read only)
- *   liba7hacks.so --lv-timing ms                  when the live view buffers change and flip (read only)
- *   liba7hacks.so --osd-mark shown|hidden secs    test: a magenta square in the shown/hidden OSD buffer
- *   liba7hacks.so --ui-find hex                   where a byte string is in the UI's own data (read only)
- *   liba7hacks.so --screenshot [osd.png lv.png] both.png
- *                                                 Sony's own screen as a PNG: its OSD over the live view (LCD or
- *                                                 EVF, as shown); with three names also each on its own
- *   liba7hacks.so --pic-census                    which of our pictures the UI has unpacked now (read only)
- *   liba7hacks.so --pic-bench                     time the picture patcher's steps on the camera (changes nothing)
- *   liba7hacks.so --glyph-cache [--mark-stale | --list] [--all]
- *                                                 UI font: show the UI's glyph cache (--mark-stale: and mark it
- *                                                 stale; --list: and list, with pictures, the glyphs drawn since;
- *                                                 --all: look in every process, not just the UI)
+ * Usage (as root): see usage[] near the end of this file, or run it with --help.
  *
  * Manual lens EXIF info (--lens-write, --lens-read): the camera fills EXIF LensModel / FocalLength / FNumber /
  * MaxApertureValue from this block when no electronic lens is attached (it is what CameraEx.setExifInfo()
@@ -2602,10 +2570,54 @@ static int lvtiming(const char *s) {
 #endif
 static const char built[] = "a7hacks helper built " A7_BUILT;
 
+/* --help (and the list of modes: the comment at the top points here) */
+static const char usage[] =
+    "Usage (as root):\n"
+    "  liba7hacks.so --lens-write id 0               manual lens EXIF info off (the camera behaves as without us)\n"
+    "  liba7hacks.so --lens-write id 1 fnum fden anum aden mnum mden [namehex]\n"
+    "      focal length fnum/fden, F-number anum/aden, widest aperture as an APEX value (2 log2 N, EXIF\n"
+    "      MaxApertureValue: the camera copies it as it is) mnum/mden,\n"
+    "      lens name as hex bytes (at most 64). Numbers are decimal.\n"
+    "  liba7hacks.so --lens-read id                  show the block\n"
+    "  liba7hacks.so --exposure-patcher              run forever: exposure focal length (see the source)\n"
+    "  liba7hacks.so --label-patcher                 run forever: menu label (see the source)\n"
+    "  liba7hacks.so --label-find [--all]            menu label, read only: show where the label is\n"
+    "  liba7hacks.so --font-patcher [--text-only]    run forever: UI font, icon and picture lettering, accent colour\n"
+    "                                                (--text-only: the UI font only)\n"
+    "  liba7hacks.so --font-restore                  UI font: put the camera's own back\n"
+    "  liba7hacks.so --set-clock                     Linux's clock: set it from the camera's own (see the source)\n"
+    "  liba7hacks.so --version                       when this helper was built (UTC)\n"
+    "  liba7hacks.so --help                          this text\n"
+    "  liba7hacks.so --memory-dump path [--all]      copy the UI's own data to path (for study elsewhere;\n"
+    "                                                --all: and the driver memory it has mapped, RAM pages only)\n"
+    "  liba7hacks.so --memory-changes start len [ms]  which 64 KB blocks of physical memory change (read only)\n"
+    "  liba7hacks.so --reg-read addr n               n 32-bit hardware registers from addr on (read only)\n"
+    "  liba7hacks.so --mem-find hex start len        where a byte string is in physical RAM (read only)\n"
+    "  liba7hacks.so --off-watch path seconds        log what changes around a switch-off (read only)\n"
+    "  liba7hacks.so --lv-timing ms                  when the live view buffers change and flip (read only)\n"
+    "  liba7hacks.so --osd-mark shown|hidden secs    test: a magenta square in the shown/hidden OSD buffer\n"
+    "  liba7hacks.so --ui-find hex                   where a byte string is in the UI's own data (read only)\n"
+    "  liba7hacks.so --screenshot [osd.png lv.png] both.png\n"
+    "                                                Sony's own screen as a PNG: its OSD over the live view (LCD or\n"
+    "                                                EVF, as shown); with three names also each on its own\n"
+    "  liba7hacks.so --pic-census                    which of our pictures the UI has unpacked now (read only)\n"
+    "  liba7hacks.so --pic-bench                     time the picture patcher's steps on the camera (changes nothing)\n"
+    "  liba7hacks.so --glyph-cache [--mark-stale | --list] [--all]\n"
+    "                                                UI font: show the UI's glyph cache (--mark-stale: and mark it\n"
+    "                                                stale; --list: and list, with pictures, the glyphs drawn since;\n"
+    "                                                --all: look in every process, not just the UI)\n"
+    "\n"
+    "Each mode is described in native/a7hacks.c: the comment at the top, and the one above its code. The answer\n"
+    "is one line on stdout (the lens modes also write it to /android/dev/a7hacks.st); the patchers report to\n"
+    "/android/dev/a7hacks.*.\n"
+    "\n"
+    "This help text was written by an LLM\n";
+static int eqn(const char *a, const char *b, int n) { for (int i = 0; i < n; i++) if (a[i] != b[i]) return 0; return 1; }
 static int eq(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *a == *b; }
 static int run(int argc, char **argv) {
     const char *o = argc >= 2 ? argv[1] : "";
     const char *o2 = argc >= 3 ? argv[2] : "";
+    if (argc == 2 && (eq(o, "--help") || eq(o, "-h"))) { say(usage); return 0; }
     if (argc == 2 && eq(o, "--version")) { out(built); out(" UTC"); return 0; }
     if (argc == 2 && eq(o, "--exposure-patcher")) return exposure();
     if (argc == 2 && eq(o, "--label-patcher")) return label();
@@ -2689,6 +2701,8 @@ static int run(int argc, char **argv) {
 
 /* prints the answer and leaves "id answer" in STATUS (written to a temporary name, then renamed) */
 static int finish(int argc, char **argv, int code) {
+    if (mlen == 11 && eqn(msg, "error usage", 11)) out(" (see --help)");
+    if (argc == 2 && (eq(argv[1], "--help") || eq(argv[1], "-h"))) return code;     /* the help is all */
     msg[mlen++] = '\n';
     sc(SYS_WRITE, 1, (long)msg, mlen, 0, 0);
     if (argc == 2 && eq(argv[1], "--set-clock")) { msg[mlen - 1] = 0; statusto(CKSTATUS, CKSTATUS ".t", msg); msg[mlen - 1] = '\n'; }

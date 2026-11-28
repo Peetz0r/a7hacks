@@ -3,6 +3,19 @@
 (the camera's own /usr/share/app files). For each file, the ranges that change: where, how long, a hash of the
 original bytes, and the new bytes without the zeros that pad them out to the range's length. A picture file's
 patch also lists the picture ids it changes (sorted), for taking loaded copies out of the UI's label store."""
+import sys as _sys
+_HELP = """usage: python3 mkheader.py ../fontpatch.h  FP comic.patch.json UniversOTS-SJ_wIcon.ltt
+           IP icons.patch.json Sony_DI_Icons.ttf  [PC image_cmn_43.uxc.patch.json image_cmn_43.uxc ...]
+Writes the C header the font patcher uses (fontpatch.h): per file (a prefix, its patch .json from build.py or
+icons/icons.py, and the camera's own file it applies to), the ranges that change, a hash of the original bytes
+and the new bytes. Sony's bytes are only identified by their hash, never copied.
+
+This help text was written by an LLM"""
+if __name__ == '__main__' and _sys.argv[1:] in (['--help'], ['-h']):
+    print(_HELP)
+    _sys.exit(0)
+if __name__ == '__main__' and (len(_sys.argv) < 5 or (len(_sys.argv) - 2) % 3):
+    _sys.exit('\n'.join(l for i, l in enumerate(_HELP.split('\n')) if i == 0 or l.startswith(' ')) + '\n(see --help)')
 import json, sys
 
 def arr(name, typ, vals, per=16):

@@ -2,6 +2,17 @@
 digit drawn inside an icon is replaced by the same character from Comic Relief Bold, fitted into the box the
 original letter took up. Each icon keeps its slot, its byte range in 'glyf', its advance and its left side
 bearing (xMin == lsb); the rest of the icon (frames, symbols) keeps its original points."""
+import sys as _sys
+_HELP = """usage: python3 icons.py         (step 4 of 5, see README)
+Replaces each letter found (shapes.pkl, corrected by fixshapes.json) inside the icons of $ICONS (default
+Sony_DI_Icons.ttf) by the same character from $COMIC (default ComicRelief-Bold.ttf), each icon keeping its own
+bytes. Writes $OUT.ttf (default icons.ttf, to look at), $OUT.patch.json (for ../mkheader.py) and
+icons.done.json. Env WIDEN: let letters grow sideways into the gaps (default 1.0).
+
+This help text was written by an LLM"""
+if __name__ == '__main__' and _sys.argv[1:] in (['--help'], ['-h']):
+    print(_HELP)
+    _sys.exit(0)
 import sys, os, math, json, struct, pickle, collections
 from fontTools.ttLib import TTFont
 from fontTools.ttLib.tables import ttProgram

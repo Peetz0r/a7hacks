@@ -1,3 +1,12 @@
+import sys as _sys
+_HELP = """usage: python3 pages.py         (optional step 5, see README)
+Before/after sheets of every icon icons.py changed: page0.png, page1.png, ... (from $ICONS, icons.ttf and
+icons.done.json).
+
+This help text was written by an LLM"""
+if __name__ == '__main__' and _sys.argv[1:] in (['--help'], ['-h']):
+    print(_HELP)
+    _sys.exit(0)
 import os
 import json, sys
 from PIL import Image, ImageDraw, ImageFont

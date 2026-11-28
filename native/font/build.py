@@ -1,6 +1,19 @@
 """Builds a same-layout replacement of the Univers glyph outlines inside UniversOTS-SJ_wIcon.ltt.
 Every replaced character keeps its slot, its byte range in 'glyf', its advance width and its left side
 bearing (xMin == lsb); only the outline bytes inside that range change (padded with zeros)."""
+import sys as _sys
+_HELP = """usage: python3 build.py ComicRelief-Regular.ttf OUT_PREFIX UniversOTS-SJ_wIcon.ltt
+Builds Comic Relief outlines that fit the slots of the camera's Univers (inside UniversOTS-SJ_wIcon.ltt, the
+camera's /usr/share/app copy): every replaced character keeps its slot, byte range, advance and left side
+bearing. Writes OUT_PREFIX.ltt and .ttf (the patched font, for checking) and OUT_PREFIX.patch.json (for
+mkheader.py). Needs fontTools. Env SERIF: the I's serif length (default 2.2).
+
+This help text was written by an LLM"""
+if __name__ == '__main__' and _sys.argv[1:] in (['--help'], ['-h']):
+    print(_HELP)
+    _sys.exit(0)
+if __name__ == '__main__' and (len(_sys.argv) != 4):
+    _sys.exit('\n'.join(l for i, l in enumerate(_HELP.split('\n')) if i == 0 or l.startswith(' ')) + '\n(see --help)')
 import sys, math, json, struct
 from fontTools.ttLib import TTFont
 from fontTools.ttLib.tables import ttProgram

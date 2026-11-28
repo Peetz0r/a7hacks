@@ -1,3 +1,12 @@
+import sys as _sys
+_HELP = """usage: python3 gsheet.py        (a check, not a step)
+Sheets of the shape groups in shapes.pkl that have more than one member: g0.png, g1.png, ...; also writes
+multi.pkl. Reads $ICONS (default Sony_DI_Icons.ttf).
+
+This help text was written by an LLM"""
+if __name__ == '__main__' and _sys.argv[1:] in (['--help'], ['-h']):
+    print(_HELP)
+    _sys.exit(0)
 import os, pickle, sys
 from fontTools.ttLib import TTFont
 from PIL import Image, ImageDraw, ImageFont, ImageChops

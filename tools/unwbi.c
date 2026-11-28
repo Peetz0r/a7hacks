@@ -16,9 +16,22 @@
  */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 static const int LENS[16] = {3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64};
 int main(int argc, char **argv) {
-    if (argc != 5) { fprintf(stderr, "usage: unwbi image start out.bin index.txt\n"); return 1; }
+    if (argc == 2 && (!strcmp(argv[1], "--help") || !strcmp(argv[1], "-h"))) {
+        fputs("usage: unwbi image start out.bin index.txt\n"
+              "Unpacks the camera's boot snapshot (flash partition 5, nflasha5: \"WBI1\") into its 4 KB memory pages:\n"
+              "  image    the partition image (nflasha5)\n"
+              "  start    where the sections begin (0x40000)\n"
+              "  out.bin  the pages, in order (their physical addresses aren't in the image)\n"
+              "  index.txt  one line per section\n"
+              "Example: ./unwbi nflasha5 0x40000 pages.bin index.txt (the comment at the top of unwbi.c has more).\n"
+              "\n"
+              "This help text was written by an LLM\n", stdout);
+        return 0;
+    }
+    if (argc != 5) { fprintf(stderr, "usage: unwbi image start out.bin index.txt (see --help)\n"); return 1; }
     FILE *f = fopen(argv[1], "rb"); if (!f) { perror(argv[1]); return 1; }
     fseek(f, 0, SEEK_END); long n = ftell(f); rewind(f);
     unsigned char *d = malloc(n + 8);

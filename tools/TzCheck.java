@@ -17,7 +17,18 @@ import java.util.List;
  * Prints each difference and a count; exit status 1 if there were any.
  */
 public final class TzCheck {
+    static final String HELP =
+        "usage: java -cp DIR nl.peetz0r.a7hacks.TzCheck TZDATA.tar[.gz] [FROM TO]\n" +
+        "Checks the app's tzdata reader (TzData.java) against the host's zdump: for every zone, the UTC offset just\n" +
+        "before and after each transition zdump lists in the years FROM..TO (default 1970 2040), and halfway between.\n" +
+        "Use the same tzdata version as the host's (rpm -q tzdata). Prints each difference and a count; exit status\n" +
+        "1 if there were any. Build: javac -d DIR app/src/main/java/nl/peetz0r/a7hacks/TzData.java tools/TzCheck.java\n" +
+        "\n" +
+        "This help text was written by an LLM";
+
     public static void main(String[] a) throws Exception {
+        if (a.length == 1 && (a[0].equals("--help") || a[0].equals("-h"))) { System.out.println(HELP); return; }
+        if (a.length != 1 && a.length != 3) { System.err.println(HELP); System.exit(2); }
         TzData tz = TzData.read(new FileInputStream(a[0]));
         String from = a.length > 2 ? a[1] : "1970", to = a.length > 2 ? a[2] : "2040";
         System.out.println("tzdata " + tz.version);

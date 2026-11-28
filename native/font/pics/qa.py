@@ -1,3 +1,12 @@
+import sys as _sys
+_HELP = """usage: python3 qa.py            (a check, not a step)
+Before/after sheets of a fixed set of pictures for checking by eye: qa1.png. Reads scan2.pkl, cat.pkl and
+overrides.pkl (if there).
+
+This help text was written by an LLM"""
+if __name__ == '__main__' and _sys.argv[1:] in (['--help'], ['-h']):
+    print(_HELP)
+    _sys.exit(0)
 import pickle,sys,random; sys.path.insert(0,'.')
 import numpy as np, render
 from PIL import Image, ImageDraw

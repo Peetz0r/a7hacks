@@ -4,6 +4,16 @@ original (after the one change made everywhere, fully transparent pixels getting
 camera stores them. The camera unpacks the original from the file, applies the same change and our pixels,
 and packs it with the same encoder (uxclz.c): mkpics checks that the result fits in the room the original
 had, and records its length and a hash, which the camera checks before writing anything."""
+import sys as _sys
+_HELP = """usage: python3 mkpics.py        (step 4 of 5, see README)
+Redraws the confirmed lettering in Comic Relief Bold and writes image_*.uxc.pics.json: per picture only the
+pixels we drew, the length and hash of the new picture as packed by ./uxclz, and a hash of the original.
+Reads scan2.pkl, cat.pkl and overrides.pkl; also writes texts.pkl. Env HUE, RED, BLUE: see hue.py.
+
+This help text was written by an LLM"""
+if __name__ == '__main__' and _sys.argv[1:] in (['--help'], ['-h']):
+    print(_HELP)
+    _sys.exit(0)
 import sys, pickle, json, subprocess, collections, os; sys.path.insert(0, '.')
 import numpy as np
 from uxc import *; from ocr import *; from render import *

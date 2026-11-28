@@ -1,3 +1,12 @@
+import sys as _sys
+_HELP = """usage: python3 shapes.py        (step 1 of 5, see README)
+Splits every icon of the camera's icon font into shapes (a contour plus the contours right inside it) and
+groups shapes that look alike. Reads $ICONS (default Sony_DI_Icons.ttf); writes shapes.pkl.
+
+This help text was written by an LLM"""
+if __name__ == '__main__' and _sys.argv[1:] in (['--help'], ['-h']):
+    print(_HELP)
+    _sys.exit(0)
 import os
 # splits every icon of Sony_DI_Icons.ttf into shapes (a contour plus the contours directly inside it) and
 # groups shapes that look alike, size-independently, so letters can be told apart from graphics

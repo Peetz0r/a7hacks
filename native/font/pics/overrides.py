@@ -1,5 +1,15 @@
 """Lines whose reading was settled by a person (the review page) or by the confirmed vocabulary: per picture,
 the line with its text, lined up with the shapes found (shapes left over are not lettering and stay)."""
+import sys as _sys
+_HELP = """usage: python3 overrides.py     (step 3 of 5, see README)
+Settles lines another way: a person's reading (human.pkl, from answers.json), a word confirmed elsewhere in
+the pictures, or the KNOWN table and badges.py; lined up with the shapes found. Reads scan2.pkl and cat.pkl;
+writes overrides.pkl.
+
+This help text was written by an LLM"""
+if __name__ == '__main__' and _sys.argv[1:] in (['--help'], ['-h']):
+    print(_HELP)
+    _sys.exit(0)
 import pickle, json, glob, re, sys, collections, difflib; sys.path.insert(0, '.')
 from ocr import finalize2, nrm
 S = pickle.load(open('scan2.pkl', 'rb')); sl = {s['h_']: s for s in S}

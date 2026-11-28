@@ -1,3 +1,12 @@
+import sys as _sys
+_HELP = """usage: python3 scan.py          (step 1 of 5, see README)
+Finds lettering in every picture of cat.pkl (the camera's pictures, unpacked) with ocr.py and writes the
+lines found to scan.pkl. Reads $UNIVERS (the camera's Univers as a .ttf, default univers.ttf).
+
+This help text was written by an LLM"""
+if __name__ == '__main__' and _sys.argv[1:] in (['--help'], ['-h']):
+    print(_HELP)
+    _sys.exit(0)
 import sys,pickle; sys.path.insert(0,'.')
 from uxc import *; from ocr import *
 cat=pickle.load(open('cat.pkl','rb'))

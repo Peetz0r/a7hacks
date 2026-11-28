@@ -1,3 +1,13 @@
+import sys as _sys
+_HELP = """usage: python3 classify.py      (step 2 of 5, see README)
+Compares each shape in shapes.pkl with the letters and digits of a few reference fonts (Univers from $LTT or
+$UNIVERS, plus DejaVu Sans Condensed Bold, Liberation Sans Narrow Bold, Carlito Bold if installed) and stores
+its best guess and score in shapes.pkl.
+
+This help text was written by an LLM"""
+if __name__ == '__main__' and _sys.argv[1:] in (['--help'], ['-h']):
+    print(_HELP)
+    _sys.exit(0)
 # guesses which shapes are letters/digits by comparing them (size-independently) with the same characters in
 # a few narrow/bold reference fonts, then keeps only those that sit in a line of text
 import os, pickle, numpy as np

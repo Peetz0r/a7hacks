@@ -1,3 +1,12 @@
+import sys as _sys
+_HELP = """usage: python3 confirm.py       (step 2 of 5, see README)
+Has Tesseract read every line in scan.pkl, from just the shapes matched, and writes the result to scan2.pkl;
+mkpics.py keeps the lines where Tesseract and the shapes agree. Needs the tesseract command.
+
+This help text was written by an LLM"""
+if __name__ == '__main__' and _sys.argv[1:] in (['--help'], ['-h']):
+    print(_HELP)
+    _sys.exit(0)
 import sys,pickle,subprocess,os,tempfile; sys.path.insert(0,'.')
 import numpy as np
 from PIL import Image

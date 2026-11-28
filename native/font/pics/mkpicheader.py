@@ -4,6 +4,19 @@ The pictures the font patcher (a7hacks --font-patcher) changes, per file: where 
 the new data's length and hash, its size unpacked, and our pixels (runs: u16 skip, u16 count, the pixels;
 ending with 0, 0; packed with the same LZ77 as the pictures, and shared between pictures that are the same).
 No pixels of Sony's are in here: only the ones we drew. Needs uxclz (cc -O2 -DUXCLZ_MAIN -x c ../../uxclz.c)."""
+import sys as _sys
+_HELP = """usage: python3 mkpicheader.py ../../picpatch.h  PC image_cmn_43.uxc.pics.json  PE image_EVF.uxc.pics.json
+          PD image_DSLR_Only_43.uxc.pics.json  PS image_DSC_Only_43.uxc.pics.json   (step 5 of 5, see README)
+Writes the C header the font patcher uses for the pictures (picpatch.h): per picture where its data is, hashes of
+the old and new data, and our pixels only (packed with Sony's LZ77, shared between pictures that are the same).
+Needs uxclz ($UXCLZ, default ./uxclz: cc -O2 -DUXCLZ_MAIN -x c -o uxclz ../../uxclz.c).
+
+This help text was written by an LLM"""
+if __name__ == '__main__' and _sys.argv[1:] in (['--help'], ['-h']):
+    print(_HELP)
+    _sys.exit(0)
+if __name__ == '__main__' and (len(_sys.argv) < 4 or (len(_sys.argv) - 2) % 2):
+    _sys.exit('\n'.join(l for i, l in enumerate(_HELP.split('\n')) if i == 0 or l.startswith(' ')) + '\n(see --help)')
 import json, sys, subprocess, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import uxc

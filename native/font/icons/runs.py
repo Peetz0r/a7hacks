@@ -1,3 +1,12 @@
+import sys as _sys
+_HELP = """usage: python3 runs.py          (step 3 of 5, see README)
+Keeps only the character guesses in shapes.pkl that stand in a line of text (or are unmistakable on their
+own), and marks those as letters in shapes.pkl.
+
+This help text was written by an LLM"""
+if __name__ == '__main__' and _sys.argv[1:] in (['--help'], ['-h']):
+    print(_HELP)
+    _sys.exit(0)
 # keeps the character guesses that sit in a line of text (or are unmistakable on their own)
 import pickle, collections
 shapes, groups = pickle.load(open('shapes.pkl', 'rb'))

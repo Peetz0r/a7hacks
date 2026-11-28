@@ -15,3 +15,5 @@ those letters and swap them for Comic Relief Bold ones, each icon staying inside
 fixshapes.json holds corrections made by eye ("glyph:contour": letter, or null for "not a letter").
 Icons whose letters are very narrow (video formats like 1080/60p) or whose Comic version doesn't fit
 in the icon's bytes keep their own lettering, as do plain bars (I, 1, the stem of an i).
+
+This text was written by an LLM

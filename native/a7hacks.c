@@ -57,13 +57,15 @@
  * [tK | nolabels] [pP[/T] | nopics] [aA] [noicons] | partial N/M [pP/T] | off [pics] | badfile | error ...; M = cached
  * characters marked; P/T: pictures done of how many, while they are still being done; hH: the time in 24 hours
  * (pics.c, clock24) in H places; iI: live view shows the focal length I instead of F--; kYYCBCR: focus peaking's
- * "Custom" colour (Sony's Yellow) is ours, in Y, Cb, Cr (from /android/dev/a7hacks.pk); z+M / z-M: files on an
- * exFAT card get M minutes east of UTC as their offset (pics.c, TZC; M from udate: time zone plus summer time,
- * so it follows a summer time switch within ~10 s); l: the card's file names are found in any case (fucase: a
- * PC's lower.txt opens too); fF, sS: seconds from the
+ * "Custom" colour (Sony's Yellow) is ours, in Y, Cb, Cr (from /android/dev/a7hacks.pk); fF, sS: seconds from the
  * patcher's start until the font, and the pictures, were all in) goes to
  * /android/dev/a7hacks.ft. A stop (SIGTERM, the app's Restart) is held off while
  * the patcher writes, so nothing is left half written.
+ *
+ * File system: --fs-patcher runs forever as well, on its own and first (the app reads A7HACKS.INI after its first
+ * pass): the SD card's file names are found in any case, and files on an exFAT card get the camera's offset from
+ * UTC in their times. Status in /android/dev/a7hacks.fs; --fs-restore puts the camera's own back (see "the file
+ * system patches" below).
  *
  * Static, no libc; the app's Gradle build makes it (task buildHelper, into app/build/helper/armeabi) with
  *   clang --target=arm-linux-gnueabi -march=armv7-a -mfpu=none -mfloat-abi=soft -static -nostdlib \
@@ -96,6 +98,7 @@ static long sc6(long n, long a, long b, long c, long d, long e, long f) {
 #define EXSTATUS "/android/dev/a7hacks.ex"
 #define UISTATUS "/android/dev/a7hacks.ui"
 #define FTSTATUS "/android/dev/a7hacks.ft"
+#define FSSTATUS "/android/dev/a7hacks.fs"
 #define FONTFILE "/usr/share/app/UniversOTS-SJ_wIcon.ltt"
 #define ICONFILE "/usr/share/app/Sony_DI_Icons.ttf"
 #define PICDIR "/usr/share/app/"
@@ -114,6 +117,7 @@ long sc6(long n, long a, long b, long c, long d, long e, long f);
 #define EXSTATUS "a7hacks.ex"
 #define UISTATUS "a7hacks.ui"
 #define FTSTATUS "a7hacks.ft"
+#define FSSTATUS "a7hacks.fs"
 #ifndef FONTFILE
 #define FONTFILE "font.ltt"
 #endif
@@ -1927,8 +1931,6 @@ static void ftreport(char *st, char *last, int left, int done, int total, int ca
         if (pics && h24n > 0) { k = scat(st, k, " h"); k = scatn(st, k, (u32)h24n); }
         if (pics && irisin > 0) { k = scat(st, k, " i"); k = scatn(st, k, irisin); }
         if (!pics && icons) k = scat(st, k, " nopics");
-        if (pics && fuin) k = scat(st, k, " l");
-        if (pics && tzinon) { k = scat(st, k, tzin < 0 ? " z-" : " z+"); k = scatn(st, k, (u32)(tzin < 0 ? -tzin : tzin)); }
         if (pics && pkin) { k = scat(st, k, " k"); char x[7]; for (int i = 0; i < 6; i++) x[i] = "0123456789abcdef"[(pkin >> (20 - 4 * i)) & 15]; x[6] = 0; k = scat(st, k, x); }
         if (pics && texd >= 0) { k = scat(st, k, " g"); k = scatn(st, k, (u32)(texd + (texe > 0 ? texe : 0))); }
         if (noicons && icons) k = scat(st, k, " noicons");
@@ -2004,8 +2006,7 @@ static int font(int on, int icons) {
         ftstatus("restoring");
         mypid = sc(SYS_GETPID, 0, 0, 0, 0, 0);
         fd = sc(SYS_OPEN, (long)"/dev/mem", 2, 0, 0, 0);
-        if (fd >= 0) { colours(0); clock24(0); fucase(0); }   /* the text accent colour, the 12 hour time and exact
-                                                                 file names back to Sony's */
+        if (fd >= 0) { colours(0); clock24(0); }   /* the text accent colour and the 12 hour time back to Sony's */
         int left = fontoff();
         if (left == 0) {                 /* and the UI's cached Comic glyphs go stale */
             fd = sc(SYS_OPEN, (long)"/dev/mem", 2, 0, 0, 0);
@@ -2065,8 +2066,6 @@ static int font(int on, int icons) {
         int acc = pics ? colours(1) : 0;      /* the text accent colour too */
         irisfl = pics && mountok ? manualfl() : 0;   /* a lens that tells no aperture: its focal length for F-- */
         if (pics) pkupdate();                 /* the peaking colour for Custom (and Sony's copies of it) */
-        if (pics) tzupdate();                 /* the offset from UTC for the files' times */
-        if (pics) fucase(1);                  /* file names on the card in any case */
         h24n = pics ? clock24(1) : 0;         /* and the time in 24 hours */
         int pleft = 0;
         if (pics && pics_state != 2) {         /* a batch at a time; once all are in, the label store's copies go */
@@ -2128,6 +2127,58 @@ static int font(int on, int icons) {
                 }
             }
         } else sc(SYS_NANOSLEEP, (long)ts, 0, 0, 0, 0);
+    }
+}
+
+/* ---- the file system patches (--fs-patcher, --fs-restore) ----
+ * The camera's SD card layer, inside im.elf, on its own and before the app reads A7HACKS.INI (so that a7hacks.ini,
+ * as a PC may save it, is found from the start; and not tied to the font options):
+ *  - file names in any case (fucase: FuFsys's strcmp slot -> strcasecmp);
+ *  - files' times on an exFAT card with the camera's offset from UTC (pics.c, kinds TZC and TZL, the offset word
+ *    from udate: time zone plus summer time, so a summer time switch is followed within ~10 s).
+ * Light, at normal priority for its first pass (everything else at start-up waits for it), then every 10 s at
+ * nice 19: the offset, and that both are still in (once a second until both are). Status (after each pass, to
+ * /android/dev/a7hacks.fs): on [l | lerrN] [z+M | z-M | znone | zerrN] (l: names in any case; z: the files'
+ * offset in minutes east of UTC; znone: the camera's clock isn't set, so Sony's "offset unknown" stays; N: why
+ * not: 1 the UI process not found, 2 a file isn't the one we know, 3 memory, 4 the place holds something else) | off [partly] | error ...; --fs-restore puts Sony's back. A stop (SIGTERM) is held off while it
+ * writes. */
+static void fsstatus(const char *s) { statusto(FSSTATUS, FSSTATUS ".t", s); }
+static int fsreport(char *st, int t, int c) {
+    int k = scat(st, 0, "on");
+    if (c >= 0 && fuin) k = scat(st, k, " l");
+    else { k = scat(st, k, " lerr"); k = scatn(st, k, (u32)(c < 0 ? -c : 1)); }
+    if (tzinon) { k = scat(st, k, tzin < 0 ? " z-" : " z+"); k = scatn(st, k, (u32)(tzin < 0 ? -tzin : tzin)); }
+    else if (!tzon) k = scat(st, k, " znone");
+    else { k = scat(st, k, " zerr"); k = scatn(st, k, (u32)(t < 0 ? -t : 1)); }
+    return fuin && (tzinon || !tzon);
+}
+static int fspatch(int on) {
+    mypid = sc(SYS_GETPID, 0, 0, 0, 0, 0);
+    fd = sc(SYS_OPEN, (long)"/dev/mem", 2, 0, 0, 0);
+    if (fd < 0) { fsstatus("error open /dev/mem"); out("error open /dev/mem"); return 2; }
+    h24fsgrp = 1;                                  /* clock24: only the file system's places */
+    if (!on) {
+        tzon = 0;
+        int t = clock24(0), c = fucase(0);
+        const char *e = t < 0 || c < 0 ? "off partly" : "off";
+        fsstatus(e); out(e); return t < 0 || c < 0 ? 2 : 0;
+    }
+    char last[80]; last[0] = 0;
+    for (u32 pass = 0; ; pass++) {
+        tzupdate();
+        int t = clock24(1), c = fucase(1);
+        char st[80];
+        int all = fsreport(st, t, c);
+        int changed = 0;
+        for (int i = 0; ; i++) { if (st[i] != last[i]) { changed = 1; break; } if (!st[i]) break; }
+        if (changed) { fsstatus(st); for (int i = 0; i < 80; i++) { last[i] = st[i]; if (!st[i]) break; } }
+#ifdef HOST
+        out(st); out(" | ");
+        if (++hostticks >= HOST_TICKS) return 0;
+#endif
+        if (pass == 0) sc(SYS_NICE, 19, 0, 0, 0, 0);   /* first pass done: the camera comes first again */
+        long ts[2] = {all || pass >= 60 ? 10 : 1, 0};
+        sc(SYS_NANOSLEEP, (long)ts, 0, 0, 0, 0);
     }
 }
 
@@ -2745,6 +2796,8 @@ static const char usage[] =
     "  liba7hacks.so --font-patcher [--text-only]    run forever: UI font, icon and picture lettering, accent colour\n"
     "                                                (--text-only: the UI font only)\n"
     "  liba7hacks.so --font-restore                  UI font: put the camera's own back\n"
+    "  liba7hacks.so --fs-patcher                    run forever: SD card file names in any case, files' UTC offset\n"
+    "  liba7hacks.so --fs-restore                    those two: put the camera's own back\n"
     "  liba7hacks.so --set-clock                     Linux's clock: set it from the camera's own (see the source)\n"
     "  liba7hacks.so --version                       when this helper was built (UTC)\n"
     "  liba7hacks.so --help                          this text\n"
@@ -2786,6 +2839,8 @@ static int run(int argc, char **argv) {
     if (argc == 2 && eq(o, "--label-patcher")) return label();
     if (eq(o, "--font-patcher") && (argc == 2 || (argc == 3 && eq(o2, "--text-only")))) return font(1, argc == 2);
     if (argc == 2 && eq(o, "--font-restore")) return font(0, 1);
+    if (argc == 2 && eq(o, "--fs-patcher")) return fspatch(1);
+    if (argc == 2 && eq(o, "--fs-restore")) return fspatch(0);
     if (argc == 2 && eq(o, "--set-clock")) return setclock();
     if (eq(o, "--screenshot") && (argc == 3 || argc == 5)) return screenshot(argc, argv);
     if (argc == 2 && eq(o, "--pic-census")) return census();

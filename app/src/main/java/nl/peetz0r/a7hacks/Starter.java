@@ -137,6 +137,34 @@ public class Starter {
     }
 
     /**
+     * File system: "liba7hacks.so --fs-patcher" runs as a root loop of its own, started before A7HACKS.INI is read:
+     * the SD card's file names are found in any case (so a7hacks.ini, as a PC may save it, is found), and files on
+     * an exFAT card get the camera's offset from UTC in their times. Its status, in /dev/a7hacks.fs after each pass:
+     * "on l z+60" (names in any case; offset +60 minutes), with "lerrN" / "zerrN" / "znone" for what isn't in.
+     */
+    static final File FS_STATUS = new File("/dev/a7hacks.fs");
+
+    static void startFs(String tool) throws NativeException {
+        startLoop(tool, "--fs-patcher", "fs");
+    }
+
+    /** Stops the file system loop, leaving its changes in place (a new one finds them done and carries on). */
+    static void stopFs() throws NativeException {
+        stopLoop("fs");
+    }
+
+    /** The file system loop's last status line, or null (its first pass isn't done yet). */
+    static String fsStatus() {
+        return readLine(FS_STATUS);
+    }
+
+    /** The camera finds the SD card's file names in any case (the file system loop's "l"). */
+    static boolean caseBlind() {
+        String s = fsStatus();
+        return s != null && (" " + s + " ").contains(" l ");
+    }
+
+    /**
      * The clock: "liba7hacks.so --set-clock" sets Linux's clock (which the boot snapshot leaves at 1970) from the
      * camera's own date and time (its udate driver), RAM only. It runs once and answers in /dev/a7hacks.ck:
      * "clock set Y-M-D h:m:s +OFF (alarm|tod)" | "clock same +OFF" | "clock unset" | "clock error ...",
@@ -180,8 +208,9 @@ public class Starter {
         return null;
     }
 
-    /** The settings file: A7HACKS.INI in the root of the SD card. In capitals: the camera's SD card layer (FuFsys)
-     *  only finds names that are 8.3 and upper case; a file saved as a7hacks.ini (lower case) by a PC is invisible to it. */
+    /** The settings file: A7HACKS.INI in the root of the SD card. The camera's SD card layer (FuFsys) only finds 8.3
+     *  names, and on its own only those stored in capitals; with the file system loop's patch (caseBlind(), in before
+     *  A7HACKS.INI is read) a7hacks.ini or A7hacks.ini as a PC may save it is found too. */
     static File[] configFiles(File sd) {
         return new File[] {new File(sd, "A7HACKS.INI")};
     }

@@ -22,6 +22,7 @@ public class StartService extends Service {
     static volatile long lastLabelTry = 0;
     static volatile long lastFontTry = 0;
     static volatile long lastClockTry = 0;
+    static volatile long lastFsTry = 0;
     static volatile long lastSummerTry = 0;
     /** From A7HACKS.INI [config] font: true = Comic Relief, false = the camera's own; null until A7HACKS.INI is read. */
     static volatile Boolean fontWanted = null;
@@ -104,11 +105,17 @@ public class StartService extends Service {
         } catch (Throwable t) {
             jlog(ctx, "stopping the font loop failed: " + t);
         }
+        try {
+            Starter.stopFs();
+        } catch (Throwable t) {
+            jlog(ctx, "stopping the file system loop failed: " + t);
+        }
         lastSamplerTry = 0;                 // start new ones right away
         lastExposureTry = 0;
         lastLabelTry = 0;
         lastFontTry = 0;
         lastClockTry = 0;
+        lastFsTry = 0;
         lastSummerTry = 0;
         restartRequested = true;
         synchronized (StartService.class) { lastStart = 0; }
@@ -138,15 +145,32 @@ public class StartService extends Service {
         for (File f : files) if (f.isFile()) { used = f; break; }
         if (used != null) AppLog.add("read " + used.getName() + ": " + p.size() + " lenses");
         else {
-            // The camera's SD card layer only opens names stored in capitals. A file a PC saved as a7hacks.ini
-            // (lower case) is listed, but can't be opened: say so instead of only "not there".
+            // Without the file system loop's patch the camera's SD card layer only opens names stored in
+            // capitals: a7hacks.ini, as a PC may save it, is listed but can't be opened. Say so instead of only
+            // "not there".
             String hidden = null;
             String[] names = sd.list();
             if (names != null) for (String n : names) if (n.equalsIgnoreCase("a7hacks.ini")) { hidden = n; break; }
             AppLog.add(hidden == null ? "no A7HACKS.INI on the SD card"
-                : hidden + " is on the SD card in lower case, which the camera can't open: rename it to A7HACKS.INI on a PC");
+                : hidden + " is on the SD card in another case, which the camera can't open now (file system: "
+                    + Starter.fsStatus() + "): rename it to A7HACKS.INI on a PC");
         }
         return true;
+    }
+
+    /** The file system loop's status, for the log: "SD card: file names in any case; files' times with their
+     *  offset from UTC (+60 min)". */
+    static String fsText(String s) {
+        if (!s.startsWith("on")) return "SD card file system: " + s;
+        String names = "file names in capitals only", times = "files' times without their offset from UTC";
+        for (String w : s.split(" ")) {
+            if (w.equals("l")) names = "file names in any case";
+            else if (w.startsWith("lerr")) names += " (" + w + ")";
+            else if (w.equals("znone")) times += " (the camera's clock isn't set)";
+            else if (w.startsWith("zerr")) times += " (" + w + ")";
+            else if (w.startsWith("z")) times = "files' times with their offset from UTC (" + w.substring(1) + " min)";
+        }
+        return "SD card: " + names + "; " + times;
     }
 
     /** "3 min 33 s", "41 s" */
@@ -180,9 +204,11 @@ public class StartService extends Service {
         boolean summerConfigured = false;
         boolean cardIn = false, cardSeen = false;   // a card put (back) in: A7HACKS.INI and the tzdata read again
         String summerZone = null;              // the timezone the summer time was configured with
+        long fsStarted = 0;                    // when the file system loop was first started (0: not yet)
+        String fsLogged = null;                // its status as last logged
         final String clockOld = Starter.clockStatus();   // an answer from before (a restart): not news
         AppLog.add("started");
-        PeakingColor.apply(ctx);               // focus peaking's custom colour, for the helper (RAM: gone at a reboot)
+        boolean peakingDone = false;           // focus peaking's custom colour handed to the helper (after A7HACKS.INI)
         while (true) {
             try {
                 if (restartRequested) {
@@ -200,6 +226,7 @@ public class StartService extends Service {
                     clockLogged = false;
                     irisLogged = null;
                     summerConfigured = false;
+                    fsStarted = 0;
                 }
                 // a card put back in (the owner may have changed A7HACKS.INI or put tzdata on it on a PC): read
                 // A7HACKS.INI again and write the lens info afresh, as Restart does, but leave the root loops running
@@ -215,8 +242,9 @@ public class StartService extends Service {
                 }
                 // The SD card is the way out: without one, nothing of ours runs as root. Should the helper ever make
                 // the camera restart, over and over (the app starts with it), take the card out, uninstall the
-                // app, and the card can go back in. So A7HACKS.INI (the card) first; all the rest waits for it.
-                if (profiles == null && !loadProfiles()) {
+                // app, and the card can go back in. So the card first; all the rest waits for it. Then the clock
+                // (log times right from the start), the file system patches, A7HACKS.INI, and the rest.
+                if (!in) {
                     if (!loggedWaitSd) {
                         AppLog.add("waiting for the SD card: nothing starts without one");
                         loggedWaitSd = true;
@@ -227,11 +255,19 @@ public class StartService extends Service {
                 // 0. the clock: Linux's clock from the camera's own, now and then every minute (it stands still
                 //    while the camera sleeps); the answer comes a moment later
                 if (SystemClock.elapsedRealtime() - lastClockTry > 60000) {
+                    boolean first = clockSeen == null;
                     lastClockTry = SystemClock.elapsedRealtime();
                     try {
                         Starter.setClock(tool.path());
                     } catch (Throwable t) {
                         jlog(ctx, "clock start failed: " + t);
+                    }
+                    // the first time, its answer before anything else (at most 2 s: it waits for the camera's
+                    // second to tick over), so that the clock is set, and said, first
+                    for (int i = 0; first && i < 40; i++) {
+                        String a = Starter.clockStatus();
+                        if (a != null && !a.equals(clockOld)) break;
+                        try { Thread.sleep(50); } catch (InterruptedException e) { return; }
                     }
                 }
                 String ck = Starter.clockStatus();
@@ -253,6 +289,35 @@ public class StartService extends Service {
                         AppLog.add("clock set from the camera: " + w[2] + " " + w[3] + (zone != null ? " " + zone : ""));
                     else if (!ck.startsWith("clock same"))
                         AppLog.add("clock: " + ck);
+                }
+                // 0b. the file system patches (the SD card's file names in any case; files' times with their offset
+                //     from UTC): a root loop of their own, started like the others (again after an update)
+                if (SystemClock.elapsedRealtime() - lastFsTry > 30000) {
+                    lastFsTry = SystemClock.elapsedRealtime();
+                    if (fsStarted == 0) fsStarted = lastFsTry;
+                    try {
+                        Starter.startFs(tool.path());
+                    } catch (Throwable t) {
+                        jlog(ctx, "file system loop start failed: " + t);
+                    }
+                }
+                String fs = Starter.fsStatus();
+                if (fs != null && !fs.equals(fsLogged)) {
+                    fsLogged = fs;
+                    AppLog.add(fsText(fs));
+                }
+                // 0c. A7HACKS.INI, once the file system loop's first pass is done (so a7hacks.ini, as a PC may save
+                //     it, is found), or after 10 s without (then only A7HACKS.INI in capitals is)
+                if (profiles == null) {
+                    if (fs == null && SystemClock.elapsedRealtime() - fsStarted < 10000) {
+                        try { Thread.sleep(200); } catch (InterruptedException e) { return; }
+                        continue;
+                    }
+                    loadProfiles();
+                    if (!peakingDone) {                // focus peaking's custom colour, for the helper (RAM: gone at
+                        PeakingColor.apply(ctx);       // a reboot); before the font loop, which reads it
+                        peakingDone = true;
+                    }
                 }
                 // 1. root sampler (retry: the root channel may not be ready right at boot)
                 if (!setting.isFresh() && SystemClock.elapsedRealtime() - lastSamplerTry > 30000) {

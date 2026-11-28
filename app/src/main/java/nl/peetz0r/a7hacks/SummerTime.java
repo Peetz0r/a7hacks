@@ -18,8 +18,9 @@ import java.lang.reflect.Field;
  *
  * The rules come from IANA's tzdata: the release this app was built with (assets/tzdataYYYYx.tar.gz, IANA's
  * tarball as is; the APK holds it un-gzipped), or a newer one from the root of the SD card: IANA's tarball renamed
- * to an upper case 8.3 name starting with TZ (TZDATA.TGZ, TZ2027A.GZ, or un-gzipped TZDATA.TAR), or a zic input
- * file such as tzdata.zi (TZDATA.ZI). The newest one wins, the built-in one on a tie. The card is looked at again
+ * to an 8.3 name starting with TZ (TZDATA.TGZ, TZ2027A.GZ, or un-gzipped TZDATA.TAR), or a zic input file such as
+ * tzdata.zi (TZDATA.ZI); in any case once the file system loop's patch is in (Starter.caseBlind), else in capitals
+ * only. The newest one wins, the built-in one on a tie. The card is looked at again
  * with every check: when its TZ files have changed (another card, a new file), the tzdata is read again.
  *
  * Only the switch: the area (the time zone's standard offset) stays the owner's. If the zone is ahead of UTC by
@@ -199,9 +200,9 @@ final class SummerTime {
             for (String n : names) {
                 String u = n.toUpperCase();
                 if (!isTzName(u)) continue;
-                if (!n.equals(u)) {
-                    AppLog.add("summer time: " + n + " is on the SD card in lower case, which the camera can't open:"
-                        + " rename it to " + u + " on a PC");
+                if (!n.equals(u) && !Starter.caseBlind()) {   // without the file system loop's patch: capitals only
+                    AppLog.add("summer time: " + n + " is on the SD card in another case, which the camera can't open"
+                        + " now (file system: " + Starter.fsStatus() + "): rename it to " + u + " on a PC");
                     continue;
                 }
                 File f = new File(sd, n);

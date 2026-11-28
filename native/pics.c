@@ -311,7 +311,8 @@ static int colours(int on) {
  *    per date format, 1 = 24 hours (Sony's 0, 0, 0, 1): Y-M-D's becomes 1.
  * Not the time's look but the files' times (kind TZC, TZL; see tzw below): on an exFAT card every file's times
  * get the camera's offset from UTC (exFAT keeps one per time stamp; Sony's always says "unknown", which
- * Linux takes as UTC, so photos look an hour or two late on a PC).
+ * Linux takes as UTC, so photos look an hour or two late on a PC). Those are the file system loop's
+ * (--fs-patcher, h24fsgrp 1); each loop touches only its own places and the files that have them.
  * Into the camera's in-memory copy of each library, like the colours (its page kept there while the font
  * patcher runs), only if the whole page is exactly the one we know (its hash with Sony's bytes in our places)
  * and each place holds Sony's bytes or ours. Written a byte at a time, in order (backwards when putting Sony's
@@ -425,6 +426,9 @@ static const struct h24p { int f; u32 off; u8 n, kind, old[4], nw[4]; } h24ps[] 
 static u8 pkw[4]; static int pkon;
 /* the offset word as its bytes (1, 0, minutes low, high); tzon: the camera knows its offset (udate) */
 static u8 tzw[4]; static int tzon;
+/* which places clock24 looks after: 0 the font loop's (all but TZC, TZL), 1 the file system loop's (TZC, TZL) */
+static int h24fsgrp;
+#define FSKIND(k) ((k) == TZC || (k) == TZL)
 /* is q (n bytes) ours for place P: its new bytes, for PKL any colour word (top byte 0: Sony's is a backup id,
  * 0x01......), for TZL any offset word (low half 1), or for IRIS_S 1..4 digits padded with NULs */
 static int h24ours(const struct h24p *P, const u8 *q) {
@@ -453,6 +457,9 @@ static int clock24(int on) {
     int ok[NH24F];
     for (int f = 0; f < NH24F; f++) {
         struct h24f *F = &h24fs[f]; ok[f] = 0;
+        int mine = 0;                                   /* a place of this loop's in this page? */
+        for (int k = 0; k < NH24P; k++) if (h24ps[k].f == f && FSKIND(h24ps[k].kind) == h24fsgrp) mine = 1;
+        if (!mine) continue;
         if (!F->map) {
             int h = sc(SYS_OPEN, (long)F->path, 0, 0, 0, 0);
             if (h < 0) continue;
@@ -487,6 +494,7 @@ static int clock24(int on) {
             int k = pass ? x : NH24P - 1 - x;
             const struct h24p *P = &h24ps[k];
             struct h24f *F = &h24fs[P->f];
+            if (FSKIND(P->kind) != h24fsgrp) continue;    /* the other loop's */
             int mine = (P->kind == H24 || P->kind == LAY) ? on : P->kind == IRIS_S ? 0
                      : (P->kind == PKC || P->kind == PKL) ? (on && pkon)
                      : (P->kind == TZC || P->kind == TZL) ? (on && tzon) : (on && irisfl > 0 && irisfl < 10000);

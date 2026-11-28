@@ -17,10 +17,13 @@ every command costs a mode change (each one sends the camera back through its US
                                  Android's own frame instead (screencap into RAM)
   camsh.py quit                  end the session properly (before an install, say)
 
+shot re-encodes the PNGs it copied (lossless; the camera writes them uncompressed): with optipng when that's
+installed, else with Python's zlib.
+
 The terminal is switched on once and left on; files are read while it is on. serve uses pmca (Sony-PMCA-RE in
 ~/Sony-PMCA-RE) as a library, since its own terminal only ends on a real Ctrl+C: run it with the Python that has
 pmca's dependencies (its venv, say). The other commands only need Python. The socket is in $XDG_RUNTIME_DIR."""
-import json, os, re, socket, sys, time
+import json, os, re, shutil, socket, struct, subprocess, sys, time, zlib
 
 SOCK = os.path.join(os.environ.get('XDG_RUNTIME_DIR') or '/tmp', 'camsh.sock')
 SHOT_REMOTE = '/android/dev/a7shot.png'      # /android/dev is tmpfs: RAM
@@ -191,6 +194,76 @@ def serve():
     senserShellCommand(complete=run)
 
 
+def _chunk(t, d):
+    return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
+
+
+def _paeth(a, b, c):
+    p = a + b - c
+    pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+    return a if pa <= pb and pa <= pc else b if pb <= pc else c
+
+
+def repng_zlib(path):
+    """re-encodes an 8-bit, non-interlaced PNG with the standard library: each row's filter chosen like libpng
+    does (smallest sum of absolute values), zlib level 9; only IHDR, IDAT and IEND are kept"""
+    b = open(path, 'rb').read()
+    if b[:8] != b'\x89PNG\r\n\x1a\n':
+        raise ValueError('not a PNG')
+    cs, i = [], 8
+    while i < len(b):
+        n, t = struct.unpack('>I4s', b[i:i + 8])
+        cs.append((t, b[i + 8:i + 8 + n]))
+        i += 12 + n
+    ihdr = dict(cs)[b'IHDR']
+    w, h, depth, ctype, _, _, inter = struct.unpack('>IIBBBBB', ihdr)
+    if depth != 8 or inter or ctype not in (0, 2, 4, 6):
+        raise ValueError('only 8-bit, non-interlaced, non-palette PNGs')
+    bpp = {0: 1, 2: 3, 4: 2, 6: 4}[ctype]
+    stride = w * bpp
+    raw = zlib.decompress(b''.join(d for t, d in cs if t == b'IDAT'))
+    rows, prev = [], bytearray(stride)
+    for y in range(h):                               # undo the file's filters
+        f = raw[y * (stride + 1)]
+        r = bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+        for x in range(stride):
+            a = r[x - bpp] if x >= bpp else 0
+            c = prev[x - bpp] if x >= bpp else 0
+            r[x] = (r[x] + (0, a, prev[x], (a + prev[x]) >> 1, _paeth(a, prev[x], c))[f]) & 255
+        rows.append(bytes(r))
+        prev = r
+    out, prev = bytearray(), bytes(stride)
+    for r in rows:
+        left, ul = bytes(bpp) + r[:-bpp], bytes(bpp) + prev[:-bpp]
+        cands = (r,
+                 bytes((a - b) & 255 for a, b in zip(r, left)),
+                 bytes((a - b) & 255 for a, b in zip(r, prev)),
+                 bytes((a - ((b + c) >> 1)) & 255 for a, b, c in zip(r, left, prev)),
+                 bytes((x - _paeth(a, b, c)) & 255 for x, a, b, c in zip(r, left, prev, ul)))
+        f, best = min(enumerate(cands), key=lambda t: sum(v if v < 128 else 256 - v for v in t[1]))
+        out.append(f)
+        out += best
+        prev = r
+    new = (b'\x89PNG\r\n\x1a\n' + _chunk(b'IHDR', ihdr) + _chunk(b'IDAT', zlib.compress(bytes(out), 9)) +
+           _chunk(b'IEND', b''))
+    if len(new) < len(b):
+        with open(path + '.tmp', 'wb') as f:
+            f.write(new)
+        os.replace(path + '.tmp', path)
+
+
+def repng(path):
+    """smaller PNG, same pixels: optipng if it's installed, else repng_zlib; returns a note for the answer"""
+    before = os.path.getsize(path)
+    how = 'optipng'
+    if shutil.which('optipng'):
+        subprocess.run(['optipng', '-quiet', '-o2', path], check=True)
+    else:
+        how = 'zlib'
+        repng_zlib(path)
+    return '%s: %d -> %d bytes (%s)' % (path, before, os.path.getsize(path), how)
+
+
 def client(args):
     if args[0] == 'pull':
         args = args[:-1] + [os.path.abspath(args[-1])]
@@ -206,6 +279,10 @@ def client(args):
         sys.stdout.write(res['out'])
         return res['rc']
     print(res.get('ok') or 'error: ' + res.get('error', '?'), file=sys.stderr if 'error' in res else sys.stdout)
+    if args[0] == 'shot' and 'error' not in res:
+        for p in args[1:]:
+            if p != '--android':
+                print(repng(p))
     return 1 if 'error' in res else 0
 
 

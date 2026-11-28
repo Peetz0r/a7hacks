@@ -59,7 +59,8 @@
  * (pics.c, clock24) in H places; iI: live view shows the focal length I instead of F--; kYYCBCR: focus peaking's
  * "Custom" colour (Sony's Yellow) is ours, in Y, Cb, Cr (from /android/dev/a7hacks.pk); z+M / z-M: files on an
  * exFAT card get M minutes east of UTC as their offset (pics.c, TZC; M from udate: time zone plus summer time,
- * so it follows a summer time switch within ~10 s); fF, sS: seconds from the
+ * so it follows a summer time switch within ~10 s); l: the card's file names are found in any case (fucase: a
+ * PC's lower.txt opens too); fF, sS: seconds from the
  * patcher's start until the font, and the pictures, were all in) goes to
  * /android/dev/a7hacks.ft. A stop (SIGTERM, the app's Restart) is held off while
  * the patcher writes, so nothing is left half written.
@@ -431,6 +432,9 @@ static int starts(const char *p, int n, const char *s) {
     for (int k = 0; s[k]; k++) if (k >= n || p[k] != s[k]) return 0;
     return 1;
 }
+/* the text (executable, from file offset 0) of FuFsys and libc in the last process read (see fucase) */
+static u32 futext, libctext;
+static int fuin;                        /* fucase: ours is in (status l) */
 /* "start-end perms offset dev inode   path" */
 static void maps_line(const char *p, const char *end) {
     u32 s, e;
@@ -447,6 +451,8 @@ static void maps_line(const char *p, const char *end) {
     /* the UI runs libObj.so (mapped executable); our font patcher maps one page of it too (read only, for the
      * peaking colour), and must not count: its memory holds our own label texts */
     if (x == 'x' && n >= 10 && starts(end - 10, 10, "/libObj.so")) isui = 1;
+    if (x == 'x' && pgo == 0 && n >= 18 && starts(end - 18, 18, "/libInfraFuFsys.so")) futext = s;
+    if (x == 'x' && pgo == 0 && n >= 15 && starts(end - 15, 15, "/libc-2.11.2.so")) libctext = s;
     if (r != 'r' || e <= s) return;
     if (heaponly == 2 && n && starts(p, n, "/dev/")) {     /* M a: driver memory too (only pages in RAM get read) */
         if (nrng < MAXRNG) { rs[nrng] = s; rend[nrng] = e; nrng++; }
@@ -465,7 +471,7 @@ static char mbuf[8192];
 /* fills rs/rend/nrng and isui from /proc/PID/maps; -1 if it can't be read */
 static int readmaps(int pid) {
     char path[40]; procpath(path, pid, "maps");
-    nrng = 0; isui = 0; heapk = -1;
+    nrng = 0; isui = 0; heapk = -1; futext = libctext = 0;
     int f = sc(SYS_OPEN, (long)path, 0, 0, 0, 0);
     if (f < 0) return -1;
     int have = 0;
@@ -1921,6 +1927,7 @@ static void ftreport(char *st, char *last, int left, int done, int total, int ca
         if (pics && h24n > 0) { k = scat(st, k, " h"); k = scatn(st, k, (u32)h24n); }
         if (pics && irisin > 0) { k = scat(st, k, " i"); k = scatn(st, k, irisin); }
         if (!pics && icons) k = scat(st, k, " nopics");
+        if (pics && fuin) k = scat(st, k, " l");
         if (pics && tzinon) { k = scat(st, k, tzin < 0 ? " z-" : " z+"); k = scatn(st, k, (u32)(tzin < 0 ? -tzin : tzin)); }
         if (pics && pkin) { k = scat(st, k, " k"); char x[7]; for (int i = 0; i < 6; i++) x[i] = "0123456789abcdef"[(pkin >> (20 - 4 * i)) & 15]; x[6] = 0; k = scat(st, k, x); }
         if (pics && texd >= 0) { k = scat(st, k, " g"); k = scatn(st, k, (u32)(texd + (texe > 0 ? texe : 0))); }
@@ -1942,12 +1949,63 @@ static void tzupdate(void) {
     if (!tzon) return;
     tzw[0] = 1; tzw[1] = 0; tzw[2] = (u8)off; tzw[3] = (u8)((u32)off >> 8);
 }
+/* File names on the SD card in any case. FuFsys (libInfraFuFsys.so, the card's FUSE layer inside im.elf) answers a
+ * lookup (getattr) from a list of the directory's names, read with Fsys_FindFirst/FindNext as they are on the
+ * card, which it compares with the name asked for, upper-cased on the way (g_fufsysCharConv), using strcmp: so
+ * lower.txt, as a PC writes it, is listed but "not there" (LOWER.TXT != lower.txt), while the file system
+ * underneath (PrFILE2) would find it. Ours: FuFsys's import slot for strcmp (its R_ARM_JUMP_SLOT at 0xf5ec, in
+ * its writable data, so a word of im.elf's own memory) points to libc's strcasecmp instead: every name compare in
+ * FuFsys ignores case, as FAT and exFAT themselves do (all ten of its strcmp calls only test for 0). New files still
+ * get upper-case names (Fsys upper-cases them). Only if both files are the ones we know (sizes, page hashes: the
+ * relocation and data pages of FuFsys, libc's strcmp and strcasecmp pages) and the slot holds strcmp's address
+ * (or ours). on: ours, off: Sony's. Returns 1 / 0 when in, <0 if it can't (status token l: ours is in). */
+#define FU_SLOT_STRCMP 0xf5ecu          /* FuFsys vaddr of the slot */
+#define LIBC_STRCMP 0x5c1d5u            /* libc-2.11.2.so, Thumb */
+#define LIBC_STRCASECMP 0x5e269u
+static int filepage(const char *path, u32 size, u32 page, u32 hash) {
+    int h = sc(SYS_OPEN, (long)path, 0, 0, 0, 0);
+    if (h < 0) return 0;
+    unsigned long long end = 0;
+    int ok = sc(SYS_LLSEEK, h, 0, 0, (long)&end, 2) >= 0 && end == size;
+    long a = ok ? sc6(SYS_MMAP2, 0, 4096, 1 /* PROT_READ */, 1 /* MAP_SHARED */, h, (long)(page >> 12)) : -1;
+    sc(SYS_CLOSE, h, 0, 0, 0, 0);
+    if (!ok || (unsigned long)a >= (unsigned long)-4095L) return 0;
+    ok = pfnv((const u8 *)a, 4096) == hash;
+    sc(SYS_MUNMAP, a, 4096, 0, 0, 0);
+    return ok;
+}
+static int fucase(int on) {
+    static int known = -1;              /* the files are on the camera's read-only root: checked once */
+    fuin = 0;
+    if (known < 0) known = filepage("/usr/lib/libInfraFuFsys.so", 32044u, 0x3000u, 0xebcef20au)
+                        && filepage("/usr/lib/libInfraFuFsys.so", 32044u, 0x7000u, 0x0b11fa97u)   /* past the end: zeros */
+                        && filepage("/lib/libc-2.11.2.so", 976084u, 0x5c000u, 0x9e9a051eu)
+                        && filepage("/lib/libc-2.11.2.so", 976084u, 0x5e000u, 0x2835875eu);
+    if (!known) return -2;
+    findprocs(0);
+    if (!np_) return -1;
+    int pid = plist[0];
+    if (readmaps(pid) < 0 || !futext || !libctext) return -1;
+    u32 va = futext + FU_SLOT_STRCMP, sony = libctext + LIBC_STRCMP, ours = libctext + LIBC_STRCASECMP, cur = 0;
+    if (vrw(pid, va, (u8 *)&cur, 4, 0) != 1) return -3;
+    u32 want = on ? ours : sony;
+    if (cur != want) {
+        if (cur != sony && cur != ours) return -4;          /* not what we know: leave it */
+        hold(1);
+        int r = vrw(pid, va, (u8 *)&want, 4, 1);            /* one aligned word */
+        hold(0);
+        if (r != 1) return -3;
+    }
+    fuin = on;
+    return on;
+}
 static int font(int on, int icons) {
     if (!on) {
         ftstatus("restoring");
         mypid = sc(SYS_GETPID, 0, 0, 0, 0, 0);
         fd = sc(SYS_OPEN, (long)"/dev/mem", 2, 0, 0, 0);
-        if (fd >= 0) { colours(0); clock24(0); }   /* the text accent colour and the 12 hour time back to Sony's */
+        if (fd >= 0) { colours(0); clock24(0); fucase(0); }   /* the text accent colour, the 12 hour time and exact
+                                                                 file names back to Sony's */
         int left = fontoff();
         if (left == 0) {                 /* and the UI's cached Comic glyphs go stale */
             fd = sc(SYS_OPEN, (long)"/dev/mem", 2, 0, 0, 0);
@@ -2008,6 +2066,7 @@ static int font(int on, int icons) {
         irisfl = pics && mountok ? manualfl() : 0;   /* a lens that tells no aperture: its focal length for F-- */
         if (pics) pkupdate();                 /* the peaking colour for Custom (and Sony's copies of it) */
         if (pics) tzupdate();                 /* the offset from UTC for the files' times */
+        if (pics) fucase(1);                  /* file names on the card in any case */
         h24n = pics ? clock24(1) : 0;         /* and the time in 24 hours */
         int pleft = 0;
         if (pics && pics_state != 2) {         /* a batch at a time; once all are in, the label store's copies go */

@@ -173,6 +173,56 @@ public class StartService extends Service {
         return "SD card: " + names + "; " + times;
     }
 
+    /** Summer time on a thread of its own: reading the tzdata takes the camera some 17 s, and nothing else needs to
+     *  wait for it (it only switches Sony's summer time, twice a year). The supervisor hands it what to do; it does
+     *  one thing at a time, in the background, as SummerTime did before on the supervisor's own thread. */
+    private static final class SummerWorker extends Thread {
+        private final SummerTime summer;
+        private String zone;
+        private boolean configure, card;
+        private Integer offset;
+
+        SummerWorker(SummerTime summer) {
+            super("summer time");
+            this.summer = summer;
+            setDaemon(true);
+        }
+
+        /** From A7HACKS.INI: the zone (null: leave the camera alone); reads the tzdata. */
+        synchronized void configure(String z) { zone = z; configure = true; card = true; notify(); }
+        /** A card put back in: its tzdata may have changed. */
+        synchronized void card() { card = true; notify(); }
+        /** Once a minute: the camera's time zone plus summer time, from the clock (see SummerTime.tick). */
+        synchronized void tick(int off) { offset = off; notify(); }
+
+        @Override
+        public void run() {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
+            while (true) {
+                String z;
+                boolean cf, cd;
+                Integer off;
+                synchronized (this) {
+                    while (!configure && !card && offset == null) {
+                        try { wait(); } catch (InterruptedException e) { return; }
+                    }
+                    z = zone; cf = configure; cd = card; off = offset;
+                    configure = false; card = false; offset = null;
+                }
+                try {
+                    if (cf) summer.configure(z);
+                    if (cd) summer.card();
+                    if (off != null && summer.tick(off)) {      // read the clock again, and look again in 5 s
+                        lastClockTry = 0;
+                        lastSummerTry = SystemClock.elapsedRealtime() - 55000;
+                    }
+                } catch (Throwable t) {
+                    AppLog.add("summer time: " + t);
+                }
+            }
+        }
+    }
+
     /** "3 min 33 s", "41 s" */
     static String took(int s) { return (s >= 60 ? s / 60 + " min " : "") + s % 60 + " s"; }
 
@@ -200,7 +250,8 @@ public class StartService extends Service {
         String irisLogged = null;
         String clockSeen = null;
         Integer clockOffset = null;            // the camera's time zone plus summer time (minutes), once known
-        final SummerTime summer = new SummerTime(ctx);
+        final SummerWorker summer = new SummerWorker(new SummerTime(ctx));
+        summer.start();
         boolean summerConfigured = false;
         boolean cardIn = false, cardSeen = false;   // a card put (back) in: A7HACKS.INI and the tzdata read again
         String summerZone = null;              // the timezone the summer time was configured with
@@ -487,9 +538,9 @@ public class StartService extends Service {
                 }
                 // 2. the lens info
                 writer.tick(SystemClock.elapsedRealtime());
-                // 3. summer time (A7HACKS.INI timezone): set up after everything above has started (reading the
-                //    built-in tzdata takes the camera some 17 s, which held up the patchers at a cold boot), then
-                //    once a minute, once Linux's clock is the camera's
+                // 3. summer time (A7HACKS.INI timezone): handed to its own thread (reading the built-in tzdata
+                //    takes the camera some 17 s, and nothing else needs to wait for it), then once a minute, once
+                //    Linux's clock is the camera's
                 String tzw = timezoneWanted;
                 if (!summerConfigured || (tzw == null ? summerZone != null : !tzw.equals(summerZone))) {
                     summer.configure(tzw);
@@ -499,10 +550,7 @@ public class StartService extends Service {
                 } else if (cardBack) summer.card();
                 if (clockOffset != null && SystemClock.elapsedRealtime() - lastSummerTry > 60000) {
                     lastSummerTry = SystemClock.elapsedRealtime();
-                    if (summer.tick(clockOffset)) {            // read the clock again, and look again in 5 s
-                        lastClockTry = 0;
-                        lastSummerTry = SystemClock.elapsedRealtime() - 55000;
-                    }
+                    summer.tick(clockOffset);
                 }
                 if (writer.isStopped() && !loggedStopped) {
                     jlog(ctx, "lens writer stopped");

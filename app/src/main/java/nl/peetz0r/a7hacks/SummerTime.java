@@ -1,7 +1,10 @@
 package nl.peetz0r.a7hacks;
 
 import android.content.Context;
+import android.os.SystemClock;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -78,7 +81,7 @@ final class SummerTime {
             inUse = "none";
             return false;
         }
-        AppLog.add("summer time: tzdata " + inUse);
+        AppLog.add("summer time: tzdata " + inUse + " (read in " + secs(readMs) + ", parsed in " + secs(parseMs) + ")");
         return true;
     }
 
@@ -176,6 +179,23 @@ final class SummerTime {
 
     // ---- the tzdata: built in, or newer from the SD card ----
 
+    private long readMs, parseMs;        // how long the last tzdata took: its bytes, and parsing them
+
+    /** TzData.read, timed: the bytes first (from the APK or the card), then the parsing, for the log. */
+    private TzData timedRead(InputStream in) throws IOException {
+        long t0 = SystemClock.elapsedRealtime();
+        ByteArrayOutputStream b = new ByteArrayOutputStream(1 << 20);
+        byte[] buf = new byte[65536];
+        for (int n; (n = in.read(buf)) > 0; ) b.write(buf, 0, n);
+        long t1 = SystemClock.elapsedRealtime();
+        TzData d = TzData.read(new ByteArrayInputStream(b.toByteArray()));
+        readMs = t1 - t0;
+        parseMs = SystemClock.elapsedRealtime() - t1;
+        return d;
+    }
+
+    private static String secs(long ms) { return ms / 1000 + "." + ms % 1000 / 100 + " s"; }
+
     private boolean load() {
         String builtIn = null;
         try {
@@ -224,7 +244,7 @@ final class SummerTime {
             try {
                 InputStream in = new FileInputStream(best);
                 try {
-                    tz = TzData.read(in);
+                    tz = timedRead(in);
                 } finally {
                     in.close();
                 }
@@ -243,7 +263,7 @@ final class SummerTime {
         try {
             InputStream in = ctx.getAssets().open(builtIn);
             try {
-                tz = TzData.read(in);
+                tz = timedRead(in);
             } finally {
                 in.close();
             }

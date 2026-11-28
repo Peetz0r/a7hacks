@@ -22,6 +22,10 @@ When you use Aperture Priority mode with Auto-ISO, it should select a best shutt
 * Screenshot tool for the native UI (CLI for now, separate OSD and Live view).
 * 24h notation was only used with D-M-Y notation, is now also used with Y-M-D notation.
 * Ships with a recent timezone database (tzdata 2026f) and allows you to upgrade by putting TZDATA.TGZ on the SD card
+* Fix Sony's filesystem driver glue layers:
+	+ Write timezone fields
+	+ Allow lowercase filenames
+	+ Allow filenames longer than 8.3 (paths up to 60 characters)
 * Update the Level view to also have the Histogram on the same screen.
 	+ [People have](https://www.dpreview.com/forums/threads/a7i-evf-with-both-histogram-and-level.4822662/) [been asking](https://www.reddit.com/r/SonyAlpha/comments/vx4vjy/comment/n5l3lb5/) [for this ](https://ca.community.sony.com/s/question/0D54O00006v8fOQSAY/sony-a7-series-incorporate-histogram-and-level-on-same-screen?language=en_US) [across many](https://www.reddit.com/r/SonyAlpha/comments/1hnrdmb/level_and_hist_on_displayevf_with_a6700/) [Sony Alpha](https://www.dpreview.com/forums/threads/showing-both-level-and-histogram-in-viewfinder-for-a6400.4430248/#post-63143887) [models for](https://www.dpreview.com/forums/threads/a6500-histogram-and-level-at-same-time.4115862/) [14 years](https://www.dpreview.com/forums/threads/no-level-and-histogram-at-the-same-time-nex7.3234071/)!
 

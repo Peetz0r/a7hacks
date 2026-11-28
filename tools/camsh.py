@@ -2,7 +2,8 @@
 """camsh: keeps a service-mode session with the camera open and takes commands over a Unix socket, so that not
 every command costs a mode change (each one sends the camera back through its USB screens to mass storage mode).
 
-  camsh.py serve                 log in (switching the camera to service mode) and wait for commands
+  camsh.py serve                 log in (switching the camera to service mode) and wait for commands; up to
+                                 three attempts (pmca gives the switch only 5 s), each printed with its time
   camsh.py serve --updater       the same in updater mode (pmca's updatershell: a small system of its own, no
                                  Android, /android/data not mounted); quit ends it and the camera starts anew
   camsh.py sh 'COMMAND'          run COMMAND in the camera's shell (as root), print its output
@@ -144,7 +145,10 @@ def serve():
     from pmca.commands.usb import senserShellCommand
     from pmca.platform.backend.senser import SenserPlatformBackend
 
+    connected = []
+
     def run(cam):
+        connected.append(True)
         b = SenserPlatformBackend(cam)
         b.start()
         cam.setTerminalEnable(False)
@@ -157,7 +161,7 @@ def serve():
             srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             srv.bind(SOCK)
             srv.listen(1)
-            print('ready on %s' % SOCK, flush=True)
+            print('%s ready on %s' % (time.strftime('%H:%M:%S'), SOCK), flush=True)
             while True:
                 conn, _ = srv.accept()
                 with conn:
@@ -205,7 +209,19 @@ def serve():
             cam.setTerminalEnable(False)
             if os.path.lexists(SOCK): os.remove(SOCK)
 
-    senserShellCommand(complete=run)
+    # pmca waits only 5 s for the camera to come back in service mode after the switch; through a VM's USB
+    # passthrough that is sometimes too short ("Operation timed out"), while the camera does get there: then the
+    # next attempt finds it in service mode right away. Each attempt is printed with its time.
+    for attempt in range(1, 4):
+        print('%s connect attempt %d of 3' % (time.strftime('%H:%M:%S'), attempt), flush=True)
+        senserShellCommand(complete=run)
+        if connected:
+            return
+        if attempt < 3:
+            print('%s no session (see above): trying again in 2 s' % time.strftime('%H:%M:%S'), flush=True)
+            time.sleep(2)
+    print('%s no session after 3 attempts' % time.strftime('%H:%M:%S'), flush=True)
+    sys.exit(1)
 
 
 def _chunk(t, d):
